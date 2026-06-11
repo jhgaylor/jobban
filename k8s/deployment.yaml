@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jobban
+  namespace: jobban
+  labels:
+    app: jobban
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jobban
+  template:
+    metadata:
+      labels:
+        app: jobban
+    spec:
+      containers:
+        - name: jobban
+          # `:latest` is mutable — the build workflow rebuilds on every
+          # push to main. imagePullPolicy: Always forces a manifest check
+          # on pod start so `kubectl rollout restart` picks up the new
+          # digest. Swap to a pinned tag once releases land.
+          image: ghcr.io/jhgaylor/jobban:latest
+          imagePullPolicy: Always
+          env:
+            # CNPG auto-generates the `jobban-pg-app` Secret on Cluster
+            # bootstrap. `uri` is the postgres://… URL Ecto reads.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: jobban-pg-app
+                  key: uri
+            - name: PHX_SERVER
+              value: "true"
+            - name: PORT
+              value: "4000"
+            - name: PHX_HOST
+              value: jobban.inevitable.fyi
+          envFrom:
+            # SECRET_KEY_BASE — SOPS-encrypted in this repo, decrypted by
+            # Flux's kustomize-controller (see jobban-secrets.enc.yaml).
+            - secretRef:
+                name: jobban-app-secrets
+          ports:
+            - containerPort: 4000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 512Mi

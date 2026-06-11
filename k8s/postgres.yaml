@@ -1,0 +1,32 @@
+# Postgres backend for jobban. CNPG auto-generates the Secret
+# `jobban-pg-app` with `host`, `port`, `username`, `password`, `dbname`,
+# `uri` keys — the Deployment consumes `uri` as DATABASE_URL.
+#
+# Single instance — Longhorn replicates the volume across nodes, which
+# is enough durability for a personal cluster (same call as grocery-aid).
+# A job-search board is tiny; 2Gi leaves generous headroom.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: jobban-pg
+  namespace: jobban
+spec:
+  instances: 1
+
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.6-standard-trixie
+
+  bootstrap:
+    initdb:
+      database: jobban_app
+      owner: jobban
+
+  storage:
+    storageClass: longhorn
+    size: 2Gi
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 512Mi

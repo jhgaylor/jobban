@@ -1,0 +1,205 @@
+/* See the Tailwind configuration guide for advanced usage
+   https://tailwindcss.com/docs/configuration */
+
+@import "tailwindcss" source(none);
+@source "../css";
+@source "../js";
+@source "../../lib/jobban_web";
+
+/* A Tailwind plugin that makes "hero-#{ICON}" classes available.
+   The heroicons installation itself is managed by your mix.exs */
+@plugin "../vendor/heroicons";
+
+/* daisyUI Tailwind Plugin. You can update this file by fetching the latest version with:
+   curl -sLO https://github.com/saadeghi/daisyui/releases/latest/download/daisyui.js
+   Make sure to look at the daisyUI changelog: https://daisyui.com/docs/changelog/ */
+@plugin "../vendor/daisyui" {
+  themes: false;
+}
+
+/* daisyUI theme plugin. You can update this file by fetching the latest version with:
+  curl -sLO https://github.com/saadeghi/daisyui/releases/latest/download/daisyui-theme.js
+  We ship with two themes, a light one inspired on Phoenix colors and a dark one inspired
+  on Elixir colors. Build your own at: https://daisyui.com/theme-generator/ */
+@plugin "../vendor/daisyui-theme" {
+  name: "dark";
+  default: false;
+  prefersdark: true;
+  color-scheme: "dark";
+  --color-base-100: oklch(24% 0.022 277);
+  --color-base-200: oklch(20.5% 0.02 277);
+  --color-base-300: oklch(17% 0.018 277);
+  --color-base-content: oklch(95% 0.012 277);
+  --color-primary: oklch(62% 0.22 292);
+  --color-primary-content: oklch(97% 0.014 292);
+  --color-secondary: oklch(70% 0.16 250);
+  --color-secondary-content: oklch(15% 0.02 250);
+  --color-accent: oklch(67% 0.23 330);
+  --color-accent-content: oklch(97% 0.014 330);
+  --color-neutral: oklch(31% 0.03 277);
+  --color-neutral-content: oklch(96% 0.01 277);
+  --color-info: oklch(68% 0.15 237);
+  --color-info-content: oklch(97% 0.013 236);
+  --color-success: oklch(72% 0.17 162);
+  --color-success-content: oklch(20% 0.04 162);
+  --color-warning: oklch(80% 0.16 86);
+  --color-warning-content: oklch(25% 0.06 86);
+  --color-error: oklch(65% 0.21 16);
+  --color-error-content: oklch(96% 0.015 12);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.21875rem;
+  --size-field: 0.21875rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+@plugin "../vendor/daisyui-theme" {
+  name: "light";
+  default: true;
+  prefersdark: false;
+  color-scheme: "light";
+  --color-base-100: oklch(99.2% 0.002 277);
+  --color-base-200: oklch(96.5% 0.005 277);
+  --color-base-300: oklch(93% 0.008 277);
+  --color-base-content: oklch(24% 0.02 277);
+  --color-primary: oklch(54% 0.22 292);
+  --color-primary-content: oklch(97% 0.014 292);
+  --color-secondary: oklch(55% 0.16 250);
+  --color-secondary-content: oklch(98% 0.01 250);
+  --color-accent: oklch(60% 0.23 330);
+  --color-accent-content: oklch(97% 0.014 330);
+  --color-neutral: oklch(40% 0.02 277);
+  --color-neutral-content: oklch(98% 0.005 277);
+  --color-info: oklch(58% 0.17 237);
+  --color-info-content: oklch(97% 0.014 254);
+  --color-success: oklch(58% 0.15 162);
+  --color-success-content: oklch(98% 0.014 180);
+  --color-warning: oklch(70% 0.17 70);
+  --color-warning-content: oklch(25% 0.06 86);
+  --color-error: oklch(58% 0.22 16);
+  --color-error-content: oklch(96% 0.015 12);
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 1rem;
+  --size-selector: 0.21875rem;
+  --size-field: 0.21875rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+}
+
+/* Add variants based on LiveView classes */
+@custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
+@custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
+@custom-variant phx-change-loading (.phx-change-loading&, .phx-change-loading &);
+
+/* Use the data attribute for dark mode  */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* Make LiveView wrapper divs transparent for layout */
+[data-phx-session], [data-phx-teleported-src] { display: contents }
+
+/* This file is for your main application CSS */
+
+/* ---- Board chrome ------------------------------------------------------ */
+
+.bg-board {
+  background-color: var(--color-base-300);
+  background-image:
+    radial-gradient(
+      60rem 32rem at 8% -10%,
+      color-mix(in oklch, var(--color-primary) 16%, transparent),
+      transparent 65%
+    ),
+    radial-gradient(
+      52rem 30rem at 96% 112%,
+      color-mix(in oklch, var(--color-accent) 13%, transparent),
+      transparent 65%
+    );
+}
+
+/* Thin, theme-aware scrollbars for the columns and board */
+.board-column,
+main {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--color-base-content) 18%, transparent) transparent;
+}
+
+/* Dashed drop hint when a column has no cards */
+.board-column:not(:has(li))::after {
+  content: "Drop a card here, or hit +";
+  display: grid;
+  place-items: center;
+  min-height: 4.5rem;
+  border: 1.5px dashed color-mix(in oklch, var(--color-base-content) 18%, transparent);
+  border-radius: 0.75rem;
+  font-size: 0.72rem;
+  color: color-mix(in oklch, var(--color-base-content) 45%, transparent);
+}
+
+/* ---- Drag and drop ----------------------------------------------------- */
+
+.drag-ghost {
+  opacity: 0.35;
+}
+
+.drag-ghost > * {
+  visibility: hidden;
+}
+
+.drag-ghost {
+  border: 1.5px dashed color-mix(in oklch, var(--color-primary) 60%, transparent) !important;
+  background: color-mix(in oklch, var(--color-primary) 10%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.drag-dragging {
+  transform: rotate(2.5deg) scale(1.03);
+  box-shadow: 0 16px 32px -8px rgb(0 0 0 / 0.35);
+  cursor: grabbing !important;
+  opacity: 1 !important;
+}
+
+body.is-dragging,
+body.is-dragging * {
+  cursor: grabbing !important;
+}
+
+body.is-dragging .board-column {
+  outline: 1.5px dashed color-mix(in oklch, var(--color-base-content) 14%, transparent);
+  outline-offset: -6px;
+  border-radius: 1rem;
+}
+
+/* ---- Motion ------------------------------------------------------------ */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+
+.animate-pop-in {
+  animation: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-pop-in {
+    animation: none;
+  }
+}

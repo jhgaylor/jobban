@@ -1,0 +1,54 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jobban
+  namespace: jobban
+  labels:
+    app: jobban
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: "Host(`jobban.inevitable.fyi`)"
+      kind: Rule
+      middlewares:
+        # Personal app with personal data — gate behind GitHub login.
+        # Only the github-user whitelist in oauth2-proxy (jhgaylor) gets in;
+        # the cookie is scoped to .inevitable.fyi so it's SSO across apps.
+        # Remove both middlewares to make the app publicly accessible.
+        #
+        # Order matters: github-auth-signin (an `errors` middleware) must
+        # come FIRST so it wraps github-auth — it catches the 401 from the
+        # auth check and rewrites it to a 302 → GitHub OAuth sign-in.
+        # Without it the browser dead-ends on a raw "Unauthorized".
+        - name: github-auth-signin
+          namespace: default
+        - name: github-auth
+          namespace: default
+      services:
+        - name: jobban
+          port: 80
+  tls:
+    secretName: jobban-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: jobban-http
+  namespace: jobban
+  labels:
+    app: jobban
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: "Host(`jobban.inevitable.fyi`)"
+      kind: Rule
+      middlewares:
+        # redirect-https lives in the default namespace; cross-namespace
+        # refs need the namespace qualifier.
+        - name: redirect-https
+          namespace: default
+      services:
+        - name: jobban
+          port: 80

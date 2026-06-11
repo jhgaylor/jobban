@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  # SECRET_KEY_BASE — SOPS-encrypted with the cluster age key, decrypted
+  # by Flux's kustomize-controller (the jobban Flux Kustomization in
+  # home-cloud carries `decryption: { provider: sops }`). jobban's only
+  # secret; if it ever grows API keys, migrate to Infisical via the
+  # home-cloud /add-secret-via-infisical skill. DATABASE_URL comes from
+  # CNPG's `jobban-pg-app`.
+  - jobban-secrets.enc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingressroute.yaml
+  - certificates.yaml
