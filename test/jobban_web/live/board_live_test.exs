@@ -83,6 +83,55 @@ defmodule JobbanWeb.BoardLiveTest do
     assert reloaded.excitement == 5
   end
 
+  test "importing from an ATS link creates a card asynchronously", %{
+    conn: conn,
+    wishlist: wishlist
+  } do
+    Req.Test.stub(Jobban.Importer, fn conn ->
+      Req.Test.html(conn, """
+      <html><head><script type="application/ld+json">
+      {"@type":"JobPosting","title":"Platform Engineer",
+       "hiringOrganization":{"name":"Tailscale"},
+       "jobLocationType":"TELECOMMUTE"}
+      </script></head><body></body></html>
+      """)
+    end)
+
+    {:ok, view, _html} = live(conn, ~p"/")
+    view |> element("button[phx-value-stage-id='#{wishlist.id}']") |> render_click()
+
+    view
+    |> form("#quick-import-#{wishlist.id}-0", %{
+      "import" => %{"stage_id" => wishlist.id, "url" => "https://jobs.ashbyhq.com/tailscale/x"}
+    })
+    |> render_submit()
+
+    html = render_async(view)
+    assert html =~ "Tailscale"
+    assert html =~ "Imported Platform Engineer at Tailscale"
+
+    [stage | _] = Board.list_stages()
+    assert [%{company: "Tailscale", location: "Remote", url: "https://jobs.ashbyhq.com/tailscale/x"}] =
+             stage.jobs
+  end
+
+  test "failed imports surface a friendly error", %{conn: conn, wishlist: wishlist} do
+    Req.Test.stub(Jobban.Importer, fn conn -> Plug.Conn.send_resp(conn, 410, "gone") end)
+
+    {:ok, view, _html} = live(conn, ~p"/")
+    view |> element("button[phx-value-stage-id='#{wishlist.id}']") |> render_click()
+
+    view
+    |> form("#quick-import-#{wishlist.id}-0", %{
+      "import" => %{"stage_id" => wishlist.id, "url" => "https://example.com/dead"}
+    })
+    |> render_submit()
+
+    html = render_async(view)
+    assert html =~ "HTTP 410"
+    assert Board.stats().total == 0
+  end
+
   test "board updates live when another process changes it", %{conn: conn, wishlist: wishlist} do
     {:ok, view, _html} = live(conn, ~p"/")
 

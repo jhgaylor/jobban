@@ -3,6 +3,7 @@ defmodule JobbanWeb.BoardLive do
 
   alias Jobban.Board
   alias Jobban.Board.Job
+  alias Jobban.Importer
 
   @sources ["LinkedIn", "Referral", "Company site", "Recruiter", "Hacker News", "Job board", "Other"]
 
@@ -32,7 +33,14 @@ defmodule JobbanWeb.BoardLive do
 
     {:ok,
      socket
-     |> assign(page_title: "Board", quick_add: nil, quick_add_seq: 0, selected_job: nil, form: nil)
+     |> assign(
+       page_title: "Board",
+       quick_add: nil,
+       quick_add_seq: 0,
+       selected_job: nil,
+       form: nil,
+       importing: %{}
+     )
      |> assign_board()}
   end
 
@@ -89,6 +97,16 @@ defmodule JobbanWeb.BoardLive do
     end
   end
 
+  def handle_event("import_job", %{"import" => %{"url" => url, "stage_id" => stage_id}}, socket) do
+    stage_id = to_int(stage_id)
+    url = String.trim(url)
+
+    {:noreply,
+     socket
+     |> update(:importing, &Map.put(&1, stage_id, url))
+     |> start_async({:import_job, stage_id}, fn -> Importer.import_from_url(url) end)}
+  end
+
   def handle_event("open_job", %{"id" => id}, socket) do
     case Board.get_job(to_int(id)) do
       nil -> {:noreply, socket}
@@ -136,6 +154,41 @@ defmodule JobbanWeb.BoardLive do
     {:noreply, socket}
   end
 
+  @impl true
+  def handle_async({:import_job, stage_id}, {:ok, result}, socket) do
+    socket = update(socket, :importing, &Map.delete(&1, stage_id))
+
+    case result do
+      {:ok, attrs} ->
+        case Board.create_job(Map.put(attrs, "stage_id", stage_id)) do
+          {:ok, job} ->
+            {:noreply,
+             socket
+             |> update(:quick_add_seq, &(&1 + 1))
+             |> put_flash(:info, "Imported #{job.title} at #{job.company}")}
+
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Couldn't save the imported job")}
+        end
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, import_error_message(reason))}
+    end
+  end
+
+  def handle_async({:import_job, stage_id}, {:exit, _reason}, socket) do
+    {:noreply,
+     socket
+     |> update(:importing, &Map.delete(&1, stage_id))
+     |> put_flash(:error, "Import crashed — add the job manually")}
+  end
+
+  defp import_error_message(:invalid_url), do: "That doesn't look like a link"
+  defp import_error_message(:no_job_found), do: "Couldn't find a job posting there — add it manually"
+  defp import_error_message({:http_error, status}), do: "The site answered with HTTP #{status}"
+  defp import_error_message(:transport_error), do: "Couldn't reach that site"
+  defp import_error_message(_), do: "Import failed — add the job manually"
+
   defp assign_board(socket) do
     assign(socket, stages: Board.list_stages(), stats: Board.stats())
   end
@@ -172,6 +225,7 @@ defmodule JobbanWeb.BoardLive do
             stage={stage}
             quick_add={@quick_add}
             quick_add_seq={@quick_add_seq}
+            importing={@importing[stage.id]}
           />
         </div>
       </main>
@@ -185,6 +239,7 @@ defmodule JobbanWeb.BoardLive do
   attr :stage, :map, required: true
   attr :quick_add, :integer, default: nil
   attr :quick_add_seq, :integer, default: 0
+  attr :importing, :string, default: nil
 
   defp stage_column(assigns) do
     assigns = assign(assigns, :style, stage_style(assigns.stage.slug))
@@ -206,36 +261,76 @@ defmodule JobbanWeb.BoardLive do
         </button>
       </header>
 
-      <form
-        :if={@quick_add == @stage.id}
-        id={"quick-add-#{@stage.id}-#{@quick_add_seq}"}
-        phx-submit="create_job"
-        class="px-3 pb-2 space-y-2 animate-pop-in"
-      >
-        <input type="hidden" name="job[stage_id]" value={@stage.id} />
-        <input
-          id={"quick-add-company-#{@stage.id}-#{@quick_add_seq}"}
-          phx-hook="AutoFocus"
-          name="job[company]"
-          placeholder="Company"
-          required
-          autocomplete="off"
-          class="input input-sm w-full"
-        />
-        <input
-          name="job[title]"
-          placeholder="Role title"
-          required
-          autocomplete="off"
-          class="input input-sm w-full"
-        />
-        <div class="flex gap-2">
-          <button type="submit" class="btn btn-primary btn-xs flex-1">Add</button>
-          <button type="button" class="btn btn-ghost btn-xs" phx-click="cancel_quick_add">
-            Cancel
+      <div :if={@quick_add == @stage.id} class="px-3 pb-2 animate-pop-in">
+        <form
+          :if={!@importing}
+          id={"quick-import-#{@stage.id}-#{@quick_add_seq}"}
+          phx-submit="import_job"
+          class="flex gap-2"
+        >
+          <input type="hidden" name="import[stage_id]" value={@stage.id} />
+          <input
+            id={"quick-import-url-#{@stage.id}-#{@quick_add_seq}"}
+            phx-hook="AutoFocus"
+            name="import[url]"
+            type="url"
+            placeholder="Paste a job posting link…"
+            required
+            autocomplete="off"
+            class="input input-sm flex-1"
+          />
+          <button type="submit" class="btn btn-primary btn-sm btn-square" aria-label="Import from link">
+            <.icon name="hero-bolt" class="size-4" />
           </button>
+        </form>
+
+        <div class="divider my-1 text-[10px] opacity-50">or by hand</div>
+
+        <form
+          id={"quick-add-#{@stage.id}-#{@quick_add_seq}"}
+          phx-submit="create_job"
+          class="space-y-2"
+        >
+          <input type="hidden" name="job[stage_id]" value={@stage.id} />
+          <input
+            name="job[company]"
+            placeholder="Company"
+            required
+            autocomplete="off"
+            class="input input-sm w-full"
+          />
+          <input
+            name="job[title]"
+            placeholder="Role title"
+            required
+            autocomplete="off"
+            class="input input-sm w-full"
+          />
+          <div class="flex gap-2">
+            <button type="submit" class="btn btn-primary btn-xs flex-1">Add</button>
+            <button type="button" class="btn btn-ghost btn-xs" phx-click="cancel_quick_add">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div
+        :if={@importing}
+        class="mx-3 mb-2.5 rounded-xl bg-base-100 border border-base-content/8 p-3.5 shadow-sm animate-pulse"
+        aria-label="Importing job"
+      >
+        <div class="flex items-start gap-2.5">
+          <span class="size-8 rounded-lg bg-base-content/10 shrink-0" />
+          <div class="min-w-0 flex-1 space-y-2 pt-0.5">
+            <div class="h-3 w-2/3 rounded bg-base-content/10" />
+            <div class="h-2.5 w-1/2 rounded bg-base-content/10" />
+          </div>
         </div>
-      </form>
+        <p class="text-[10px] opacity-50 mt-2.5 truncate">
+          <.icon name="hero-bolt-micro" class="size-3 inline" /> importing {@importing}
+        </p>
+      </div>
 
       <ul
         id={"stage-#{@stage.id}"}

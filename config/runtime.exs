@@ -23,6 +23,14 @@ end
 config :jobban, JobbanWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# OpenRouter — optional LLM pass that extracts job details from a pasted
+# ATS link. Read in all envs so dev can exercise it when a key is present;
+# absence just disables the enhancement (the importer falls back to its
+# deterministic JSON-LD/meta parse).
+config :jobban,
+  openrouter_api_key: System.get_env("OPENROUTER_API_KEY"),
+  openrouter_model: System.get_env("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
