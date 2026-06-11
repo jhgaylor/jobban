@@ -448,13 +448,19 @@ defmodule JobbanWeb.BoardLive do
         <div class="px-5 pb-5">
           <h4 class="text-xs font-semibold uppercase tracking-wider opacity-50 mb-3">Activity</h4>
 
-          <form id={"note-form-#{length(@job.activities)}"} phx-submit="add_note" class="flex gap-2 mb-4">
-            <input
+          <form
+            id={"note-form-#{length(@job.activities)}"}
+            phx-submit="add_note"
+            class="flex gap-2 mb-4 items-start"
+          >
+            <textarea
+              id={"note-body-#{length(@job.activities)}"}
+              phx-hook="SubmitOnMetaEnter"
               name="note[body]"
-              placeholder="Log a note — call, follow-up, gut feeling…"
-              autocomplete="off"
-              class="input input-sm flex-1"
-            />
+              rows="2"
+              placeholder="Log a note — interview details, calls, gut feelings… (⌘↵ to save)"
+              class="textarea textarea-sm flex-1 leading-snug"
+            ></textarea>
             <button type="submit" class="btn btn-soft btn-sm">
               <.icon name="hero-plus-micro" class="size-4" /> Note
             </button>
@@ -465,7 +471,7 @@ defmodule JobbanWeb.BoardLive do
               <span class="grid place-items-center size-6 rounded-full bg-base-200 shrink-0 mt-px">
                 <.icon name={activity_icon(activity.kind)} class="size-3 opacity-60" />
               </span>
-              <p class="flex-1 leading-snug opacity-85">{activity.body}</p>
+              <p class="flex-1 leading-snug opacity-85 whitespace-pre-line">{activity.body}</p>
               <span class="text-xs opacity-40 tabular-nums shrink-0 mt-0.5">
                 {relative_time(activity.inserted_at)}
               </span>

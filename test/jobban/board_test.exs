@@ -106,5 +106,13 @@ defmodule Jobban.BoardTest do
       reloaded = Board.get_job!(job.id)
       assert Enum.any?(reloaded.activities, &(&1.kind == "note" and &1.body == "Spoke to recruiter"))
     end
+
+    test "preserves internal newlines for interview write-ups", %{wishlist: wishlist} do
+      job = job_fixture(wishlist)
+      body = "Panel round:\n- system design went well\n- comp band 210-240\n\nFollow up Friday"
+      {:ok, activity} = Board.add_note(job, body)
+
+      assert activity.body == body
+    end
   end
 end

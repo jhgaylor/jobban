@@ -61,6 +61,18 @@ export const AutoFocus = {
   },
 }
 
+// Cmd/Ctrl+Enter submits the surrounding form — newlines stay newlines.
+export const SubmitOnMetaEnter = {
+  mounted() {
+    this.el.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault()
+        this.el.form.requestSubmit()
+      }
+    })
+  },
+}
+
 // Clears info flashes after a beat (clicking a flash dismisses it).
 export const AutoDismiss = {
   mounted() {
