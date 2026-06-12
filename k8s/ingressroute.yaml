@@ -9,22 +9,31 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: "Host(`jobban.inevitable.fyi`)"
+    # /login is the one route gated by GitHub SSO. Traefik gives the
+    # longer rule higher priority, so this wins over the catch-all below.
+    # oauth2-proxy whitelists github-user jhgaylor; on success the
+    # forwardAuth middleware overwrites x-auth-request-user with the
+    # verified login (spoofed values can't survive it) and the app's
+    # AuthController turns that into a write-access session.
+    #
+    # Order matters: github-auth-signin (an `errors` middleware) must
+    # come FIRST so it wraps github-auth — it catches the 401 from the
+    # auth check and rewrites it to a 302 → GitHub OAuth sign-in.
+    - match: "Host(`jobban.inevitable.fyi`) && PathPrefix(`/login`)"
       kind: Rule
       middlewares:
-        # Personal app with personal data — gate behind GitHub login.
-        # Only the github-user whitelist in oauth2-proxy (jhgaylor) gets in;
-        # the cookie is scoped to .inevitable.fyi so it's SSO across apps.
-        # Remove both middlewares to make the app publicly accessible.
-        #
-        # Order matters: github-auth-signin (an `errors` middleware) must
-        # come FIRST so it wraps github-auth — it catches the 401 from the
-        # auth check and rewrites it to a 302 → GitHub OAuth sign-in.
-        # Without it the browser dead-ends on a raw "Unauthorized".
         - name: github-auth-signin
           namespace: default
         - name: github-auth
           namespace: default
+      services:
+        - name: jobban
+          port: 80
+    # Everything else is publicly reachable on purpose: the app serves a
+    # read-only board to anonymous visitors (notes hidden) and rejects
+    # write events server-side without the session from /login.
+    - match: "Host(`jobban.inevitable.fyi`)"
+      kind: Rule
       services:
         - name: jobban
           port: 80
