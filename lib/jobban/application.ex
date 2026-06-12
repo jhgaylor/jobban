@@ -13,10 +13,14 @@ defmodule Jobban.Application do
       {DNSCluster, query: Application.get_env(:jobban, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Jobban.PubSub},
       Jobban.RateLimit,
-      # Start a worker by calling: Jobban.Worker.start_link(arg)
-      # {Jobban.Worker, arg},
+      {Task.Supervisor, name: Jobban.TaskSupervisor},
       # Start to serve requests, typically the last entry
-      JobbanWeb.Endpoint
+      JobbanWeb.Endpoint,
+      # One-shot retroactive fit scoring; exits immediately when disabled
+      Supervisor.child_spec({Task, &Jobban.FitScorer.backfill/0},
+        id: :fit_backfill,
+        restart: :temporary
+      )
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

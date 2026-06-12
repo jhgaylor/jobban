@@ -15,6 +15,6 @@ defmodule Jobban.Board.Activity do
     activity
     |> cast(attrs, [:kind, :body, :job_id])
     |> validate_required([:kind, :body, :job_id])
-    |> validate_inclusion(:kind, ~w(created moved note updated))
+    |> validate_inclusion(:kind, ~w(created moved note updated scored))
   end
 end

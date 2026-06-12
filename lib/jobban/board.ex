@@ -88,7 +88,38 @@ defmodule Jobban.Board do
 
     with {:ok, job} <- result do
       broadcast_change()
+      Jobban.FitScorer.score_async(job)
       {:ok, job}
+    end
+  end
+
+  @doc "Jobs that have never been fit-scored — the boot backfill's worklist."
+  def jobs_missing_fit do
+    Repo.all(from j in Job, where: is_nil(j.fit_score), order_by: [asc: j.id])
+  end
+
+  @doc """
+  Records an LLM fit evaluation. Re-fetches the job by id so a job deleted
+  while its scoring task was in flight is a clean no-op instead of a stale
+  update.
+  """
+  def record_fit(%Job{id: id}, score, summary) do
+    case Repo.get(Job, id) do
+      nil ->
+        {:error, :job_deleted}
+
+      job ->
+        attrs = %{
+          fit_score: score,
+          fit_summary: summary,
+          fit_scored_at: DateTime.utc_now(:second)
+        }
+
+        with {:ok, job} <- job |> Job.fit_changeset(attrs) |> Repo.update() do
+          log(job, "scored", "Fit check: #{score}/5#{if summary, do: " — #{summary}"}")
+          broadcast_change()
+          {:ok, job}
+        end
     end
   end
 

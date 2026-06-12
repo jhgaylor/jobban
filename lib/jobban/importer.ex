@@ -32,6 +32,19 @@ defmodule Jobban.Importer do
     end
   end
 
+  @doc """
+  Fetches a URL and returns its visible page text — same validation, SSRF
+  guard, and text extraction as an import. Used by the fit scorer to give
+  the LLM the full posting, since jobs only persist the headline fields.
+  """
+  def fetch_page_text(url) when is_binary(url) do
+    with :ok <- validate_url(url),
+         :ok <- check_host(url),
+         {:ok, html} <- fetch(url) do
+      {:ok, page_text(html)}
+    end
+  end
+
   @doc false
   # Public for tests — pure extraction over fetched HTML.
   def extract(html, url) do

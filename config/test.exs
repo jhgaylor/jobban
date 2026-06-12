@@ -37,6 +37,13 @@ config :phoenix,
 # Route importer HTTP through Req.Test stubs (no live network in tests)
 config :jobban, importer_req_options: [plug: {Req.Test, Jobban.Importer}]
 
+# Fit scoring: off by default so creates stay deterministic; FitScorer tests
+# call score/1 directly through the OpenRouter stub with an inline profile
+config :jobban,
+  fit_scoring_enabled: false,
+  fit_profile: "Test candidate: staff platform engineer, remote only.",
+  openrouter_req_options: [plug: {Req.Test, Jobban.LLM.OpenRouter}]
+
 # Auth: GitHub login the proxy header must match
 config :jobban, github_user: "jhgaylor"
 

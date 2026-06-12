@@ -75,7 +75,7 @@ defmodule JobbanWeb.BoardLive do
   # Every mutating event funnels through this guard first — hiding the
   # controls client-side is cosmetic, this is the actual enforcement.
   @write_events ~w(move_job open_quick_add cancel_quick_add create_job import_job
-                   validate_job save_job delete_job add_note)
+                   validate_job save_job delete_job add_note rescore_fit)
 
   @impl true
   def handle_event(event, _params, %{assigns: %{admin?: false}} = socket)
@@ -167,6 +167,20 @@ defmodule JobbanWeb.BoardLive do
   def handle_event("delete_job", _params, socket) do
     {:ok, _} = Board.delete_job(socket.assigns.selected_job)
     {:noreply, assign(socket, selected_job: nil, form: nil)}
+  end
+
+  def handle_event("rescore_fit", _params, socket) do
+    cond do
+      socket.assigns.selected_job == nil ->
+        {:noreply, socket}
+
+      Jobban.FitScorer.enabled?() ->
+        Jobban.FitScorer.score_async(socket.assigns.selected_job)
+        {:noreply, put_flash(socket, :info, "Re-scoring fit…")}
+
+      true ->
+        {:noreply, put_flash(socket, :error, "Fit scoring needs an OpenRouter key")}
+    end
   end
 
   def handle_event("add_note", %{"note" => %{"body" => body}}, socket) do
@@ -445,6 +459,7 @@ defmodule JobbanWeb.BoardLive do
       <div class="flex items-center justify-between mt-2.5">
         <div class="flex items-center gap-1.5">
           <.stars value={@job.excitement} class="text-[10px]" />
+          <.fit_badge job={@job} title={@admin? && @job.fit_summary} />
           <span
             :if={@admin? && @job.approach}
             class="text-violet-400/80"
@@ -498,6 +513,31 @@ defmodule JobbanWeb.BoardLive do
     """
   end
 
+  attr :job, :map, required: true
+  attr :title, :any, default: nil
+  attr :class, :string, default: ""
+
+  defp fit_badge(assigns) do
+    ~H"""
+    <span
+      :if={@job.fit_score}
+      class={[
+        "badge badge-xs gap-1 border-0 font-semibold tabular-nums py-2",
+        fit_color(@job.fit_score),
+        @class
+      ]}
+      title={@title || nil}
+      aria-label={"Fit #{@job.fit_score} of 5"}
+    >
+      <.icon name="hero-scale-micro" class="size-3" /> fit {@job.fit_score}
+    </span>
+    """
+  end
+
+  defp fit_color(score) when score >= 4, do: "bg-emerald-500/15 text-emerald-500"
+  defp fit_color(3), do: "bg-amber-500/15 text-amber-500"
+  defp fit_color(_), do: "bg-rose-500/15 text-rose-500"
+
   attr :value, :integer, required: true
   attr :class, :string, default: ""
 
@@ -538,14 +578,15 @@ defmodule JobbanWeb.BoardLive do
   attr :form, :any, required: true
   attr :admin?, :boolean, required: true
 
-  # Notes and the way-in approach are private: read-only visitors get neither
-  # field, and note activities are filtered out of the render entirely, so
-  # they never reach the wire.
+  # Notes, the way-in approach, and fit summaries are private: read-only
+  # visitors get the fit number but not the rationale (it describes the
+  # candidate's preferences), and note/scored activities are filtered out of
+  # the render entirely, so they never reach the wire.
   defp job_modal(assigns) do
     activities =
       if assigns.admin?,
         do: assigns.job.activities,
-        else: Enum.reject(assigns.job.activities, &(&1.kind == "note"))
+        else: Enum.reject(assigns.job.activities, &(&1.kind in ["note", "scored"]))
 
     assigns = assign(assigns, :activities, activities)
 
@@ -590,6 +631,27 @@ defmodule JobbanWeb.BoardLive do
           <p class="text-sm leading-relaxed opacity-85 whitespace-pre-line">{@job.approach}</p>
         </div>
 
+        <div
+          :if={@admin? && (@job.fit_score || Jobban.FitScorer.enabled?())}
+          class="mx-5 mt-4 rounded-xl bg-sky-500/8 border border-sky-500/15 p-4"
+        >
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-sky-400 flex items-center gap-1.5 mb-2">
+            <.icon name="hero-scale-micro" class="size-3.5" /> Fit check
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs ml-auto gap-1 opacity-60 hover:opacity-100"
+              phx-click="rescore_fit"
+            >
+              <.icon name="hero-arrow-path-micro" class="size-3" /> Re-score
+            </button>
+          </h4>
+          <div :if={@job.fit_score} class="flex items-start gap-2">
+            <.fit_badge job={@job} class="mt-0.5 shrink-0" />
+            <p class="text-sm leading-relaxed opacity-85">{@job.fit_summary}</p>
+          </div>
+          <p :if={!@job.fit_score} class="text-sm opacity-50 italic">Not scored yet.</p>
+        </div>
+
         <div :if={!@admin?} class="p-5 pt-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
             <.detail :if={@job.location} label="Location" value={@job.location} />
@@ -614,6 +676,10 @@ defmodule JobbanWeb.BoardLive do
             <div>
               <p class="text-xs font-semibold uppercase tracking-wider opacity-50">Excitement</p>
               <.stars value={@job.excitement} class="text-sm" />
+            </div>
+            <div :if={@job.fit_score}>
+              <p class="text-xs font-semibold uppercase tracking-wider opacity-50">Fit</p>
+              <.fit_badge job={@job} class="mt-1" />
             </div>
           </div>
         </div>
@@ -754,6 +820,7 @@ defmodule JobbanWeb.BoardLive do
   defp activity_icon("created"), do: "hero-sparkles-micro"
   defp activity_icon("moved"), do: "hero-arrow-right-micro"
   defp activity_icon("note"), do: "hero-chat-bubble-bottom-center-text-micro"
+  defp activity_icon("scored"), do: "hero-scale-micro"
   defp activity_icon(_), do: "hero-bolt-micro"
 
   defp relative_time(datetime) do
