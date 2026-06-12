@@ -65,6 +65,11 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
+  # GitHub login the SSO proxy must vouch for (x-auth-request-user header
+  # on /login, set by Traefik forwardAuth) to unlock write access. The
+  # board itself is public.
+  config :jobban, github_user: System.get_env("ADMIN_GITHUB_USER", "jhgaylor")
+
   host = System.get_env("PHX_HOST") || "example.com"
 
   config :jobban, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")

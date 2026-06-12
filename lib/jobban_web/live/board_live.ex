@@ -5,7 +5,15 @@ defmodule JobbanWeb.BoardLive do
   alias Jobban.Board.Job
   alias Jobban.Importer
 
-  @sources ["LinkedIn", "Referral", "Company site", "Recruiter", "Hacker News", "Job board", "Other"]
+  @sources [
+    "LinkedIn",
+    "Referral",
+    "Company site",
+    "Recruiter",
+    "Hacker News",
+    "Job board",
+    "Other"
+  ]
 
   @stage_styles %{
     "wishlist" => %{dot: "bg-violet-400", glow: "shadow-violet-500/20", count: "text-violet-400"},
@@ -28,13 +36,14 @@ defmodule JobbanWeb.BoardLive do
   ]
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     if connected?(socket), do: Board.subscribe()
 
     {:ok,
      socket
      |> assign(
        page_title: "Board",
+       admin?: JobbanWeb.Auth.admin_session?(session),
        quick_add: nil,
        quick_add_seq: 0,
        selected_job: nil,
@@ -63,7 +72,17 @@ defmodule JobbanWeb.BoardLive do
     {:noreply, socket}
   end
 
+  # Every mutating event funnels through this guard first — hiding the
+  # controls client-side is cosmetic, this is the actual enforcement.
+  @write_events ~w(move_job open_quick_add cancel_quick_add create_job import_job
+                   validate_job save_job delete_job add_note)
+
   @impl true
+  def handle_event(event, _params, %{assigns: %{admin?: false}} = socket)
+      when event in @write_events do
+    {:noreply, put_flash(socket, :error, "Read-only view — log in to make changes")}
+  end
+
   def handle_event("move_job", %{"id" => id, "stage_id" => stage_id, "index" => index}, socket) do
     case Board.get_job(to_int(id)) do
       nil ->
@@ -109,8 +128,12 @@ defmodule JobbanWeb.BoardLive do
 
   def handle_event("open_job", %{"id" => id}, socket) do
     case Board.get_job(to_int(id)) do
-      nil -> {:noreply, socket}
-      job -> {:noreply, assign(socket, selected_job: job, form: to_form(Board.change_job(job)))}
+      nil ->
+        {:noreply, socket}
+
+      job ->
+        form = if socket.assigns.admin?, do: to_form(Board.change_job(job))
+        {:noreply, assign(socket, selected_job: job, form: form)}
     end
   end
 
@@ -184,7 +207,10 @@ defmodule JobbanWeb.BoardLive do
   end
 
   defp import_error_message(:invalid_url), do: "That doesn't look like a link"
-  defp import_error_message(:no_job_found), do: "Couldn't find a job posting there — add it manually"
+
+  defp import_error_message(:no_job_found),
+    do: "Couldn't find a job posting there — add it manually"
+
   defp import_error_message({:http_error, status}), do: "The site answered with HTTP #{status}"
   defp import_error_message(:transport_error), do: "Couldn't reach that site"
   defp import_error_message(_), do: "Import failed — add the job manually"
@@ -212,9 +238,27 @@ defmodule JobbanWeb.BoardLive do
             <.stat_pill value={@stats.total} label="tracked" />
             <.stat_pill value={@stats.in_flight} label="in flight" />
             <.stat_pill value={@stats.interviewing} label="interviewing" />
-            <.stat_pill value={@stats.offers} label={if @stats.offers == 1, do: "offer 🎉", else: "offers"} />
+            <.stat_pill
+              value={@stats.offers}
+              label={if @stats.offers == 1, do: "offer 🎉", else: "offers"}
+            />
           </div>
           <Layouts.theme_toggle />
+          <a
+            :if={!@admin?}
+            href={~p"/login"}
+            class="btn btn-ghost btn-sm gap-1.5 opacity-60 hover:opacity-100"
+          >
+            <.icon name="hero-lock-closed-micro" class="size-3.5" /> Log in
+          </a>
+          <.link
+            :if={@admin?}
+            href={~p"/logout"}
+            method="delete"
+            class="btn btn-ghost btn-sm gap-1.5 opacity-60 hover:opacity-100"
+          >
+            <.icon name="hero-arrow-right-start-on-rectangle-micro" class="size-3.5" /> Log out
+          </.link>
         </div>
       </header>
 
@@ -223,6 +267,7 @@ defmodule JobbanWeb.BoardLive do
           <.stage_column
             :for={stage <- @stages}
             stage={stage}
+            admin?={@admin?}
             quick_add={@quick_add}
             quick_add_seq={@quick_add_seq}
             importing={@importing[stage.id]}
@@ -230,13 +275,14 @@ defmodule JobbanWeb.BoardLive do
         </div>
       </main>
 
-      <.job_modal :if={@selected_job} job={@selected_job} form={@form} />
+      <.job_modal :if={@selected_job} job={@selected_job} form={@form} admin?={@admin?} />
       <Layouts.flash_group flash={@flash} />
     </div>
     """
   end
 
   attr :stage, :map, required: true
+  attr :admin?, :boolean, required: true
   attr :quick_add, :integer, default: nil
   attr :quick_add_seq, :integer, default: 0
   attr :importing, :string, default: nil
@@ -251,6 +297,7 @@ defmodule JobbanWeb.BoardLive do
         <h2 class="font-semibold text-sm tracking-wide">{@stage.name}</h2>
         <span class={["text-xs font-bold tabular-nums", @style.count]}>{length(@stage.jobs)}</span>
         <button
+          :if={@admin?}
           type="button"
           class="ml-auto btn btn-ghost btn-xs btn-circle opacity-50 hover:opacity-100 transition-opacity"
           phx-click="open_quick_add"
@@ -261,7 +308,7 @@ defmodule JobbanWeb.BoardLive do
         </button>
       </header>
 
-      <div :if={@quick_add == @stage.id} class="px-3 pb-2 animate-pop-in">
+      <div :if={@admin? && @quick_add == @stage.id} class="px-3 pb-2 animate-pop-in">
         <form
           :if={!@importing}
           id={"quick-import-#{@stage.id}-#{@quick_add_seq}"}
@@ -279,7 +326,11 @@ defmodule JobbanWeb.BoardLive do
             autocomplete="off"
             class="input input-sm flex-1"
           />
-          <button type="submit" class="btn btn-primary btn-sm btn-square" aria-label="Import from link">
+          <button
+            type="submit"
+            class="btn btn-primary btn-sm btn-square"
+            aria-label="Import from link"
+          >
             <.icon name="hero-bolt" class="size-4" />
           </button>
         </form>
@@ -334,11 +385,11 @@ defmodule JobbanWeb.BoardLive do
 
       <ul
         id={"stage-#{@stage.id}"}
-        phx-hook="BoardColumn"
+        phx-hook={@admin? && "BoardColumn"}
         data-stage-id={@stage.id}
         class="board-column flex-1 overflow-y-auto px-3 pb-3 space-y-2.5 min-h-16"
       >
-        <.job_card :for={job <- @stage.jobs} job={job} stage_slug={@stage.slug} />
+        <.job_card :for={job <- @stage.jobs} job={job} stage_slug={@stage.slug} admin?={@admin?} />
       </ul>
     </section>
     """
@@ -346,6 +397,7 @@ defmodule JobbanWeb.BoardLive do
 
   attr :job, :map, required: true
   attr :stage_slug, :string, required: true
+  attr :admin?, :boolean, required: true
 
   defp job_card(assigns) do
     ~H"""
@@ -355,8 +407,9 @@ defmodule JobbanWeb.BoardLive do
       phx-click="open_job"
       phx-value-id={@job.id}
       class={[
-        "job-card group cursor-grab rounded-xl bg-base-100 border border-base-content/8 p-3.5 shadow-sm",
+        "job-card group rounded-xl bg-base-100 border border-base-content/8 p-3.5 shadow-sm",
         "hover:shadow-lg hover:-translate-y-0.5 hover:border-base-content/15 transition-all duration-200",
+        if(@admin?, do: "cursor-grab", else: "cursor-pointer"),
         @stage_slug == "rejected" && "opacity-60 hover:opacity-90"
       ]}
     >
@@ -459,10 +512,33 @@ defmodule JobbanWeb.BoardLive do
     """
   end
 
+  attr :label, :string, required: true
+  attr :value, :string, required: true
+
+  defp detail(assigns) do
+    ~H"""
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-wider opacity-50">{@label}</p>
+      <p class="opacity-85">{@value}</p>
+    </div>
+    """
+  end
+
   attr :job, :map, required: true
   attr :form, :any, required: true
+  attr :admin?, :boolean, required: true
 
+  # Notes are private: read-only visitors get neither the notes field nor
+  # note activities — they're filtered out of the render entirely, so they
+  # never reach the wire.
   defp job_modal(assigns) do
+    activities =
+      if assigns.admin?,
+        do: assigns.job.activities,
+        else: Enum.reject(assigns.job.activities, &(&1.kind == "note"))
+
+    assigns = assign(assigns, :activities, activities)
+
     ~H"""
     <div
       class="fixed inset-0 z-50 grid place-items-center p-4 sm:p-6 bg-black/40 backdrop-blur-sm animate-fade-in"
@@ -494,7 +570,36 @@ defmodule JobbanWeb.BoardLive do
           </button>
         </div>
 
+        <div :if={!@admin?} class="p-5 pt-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
+            <.detail :if={@job.location} label="Location" value={@job.location} />
+            <.detail :if={@job.salary} label="Salary" value={@job.salary} />
+            <.detail :if={@job.source} label="Source" value={@job.source} />
+            <.detail
+              :if={@job.applied_on}
+              label="Applied on"
+              value={Calendar.strftime(@job.applied_on, "%b %-d, %Y")}
+            />
+            <div :if={@job.url}>
+              <p class="text-xs font-semibold uppercase tracking-wider opacity-50">Posting</p>
+              <a
+                href={@job.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="link link-hover opacity-85 break-all"
+              >
+                {@job.url}
+              </a>
+            </div>
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-wider opacity-50">Excitement</p>
+              <.stars value={@job.excitement} class="text-sm" />
+            </div>
+          </div>
+        </div>
+
         <.form
+          :if={@admin?}
           for={@form}
           id="job-form"
           phx-change="validate_job"
@@ -507,7 +612,13 @@ defmodule JobbanWeb.BoardLive do
             <.input field={@form[:location]} label="Location" placeholder="Remote, Austin, …" />
             <.input field={@form[:salary]} label="Salary" placeholder="$150k–180k" />
             <.input field={@form[:url]} label="Posting URL" placeholder="https://…" />
-            <.input field={@form[:source]} type="select" label="Source" prompt="Where'd you find it?" options={sources()} />
+            <.input
+              field={@form[:source]}
+              type="select"
+              label="Source"
+              prompt="Where'd you find it?"
+              options={sources()}
+            />
             <.input field={@form[:applied_on]} type="date" label="Applied on" />
             <div class="fieldset mb-2">
               <label class="label" for="job-excitement">Excitement</label>
@@ -544,6 +655,7 @@ defmodule JobbanWeb.BoardLive do
           <h4 class="text-xs font-semibold uppercase tracking-wider opacity-50 mb-3">Activity</h4>
 
           <form
+            :if={@admin?}
             id={"note-form-#{length(@job.activities)}"}
             phx-submit="add_note"
             class="flex gap-2 mb-4 items-start"
@@ -562,7 +674,7 @@ defmodule JobbanWeb.BoardLive do
           </form>
 
           <ol class="space-y-2.5">
-            <li :for={activity <- @job.activities} class="flex items-start gap-2.5 text-sm">
+            <li :for={activity <- @activities} class="flex items-start gap-2.5 text-sm">
               <span class="grid place-items-center size-6 rounded-full bg-base-200 shrink-0 mt-px">
                 <.icon name={activity_icon(activity.kind)} class="size-3 opacity-60" />
               </span>
@@ -572,7 +684,7 @@ defmodule JobbanWeb.BoardLive do
               </span>
             </li>
           </ol>
-          <p :if={@job.activities == []} class="text-sm opacity-40 italic">No activity yet.</p>
+          <p :if={@activities == []} class="text-sm opacity-40 italic">No activity yet.</p>
         </div>
       </div>
     </div>

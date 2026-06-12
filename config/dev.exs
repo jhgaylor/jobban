@@ -87,3 +87,6 @@ config :phoenix_live_view,
   debug_attributes: true,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
+
+# No SSO proxy in front of localhost — /login just grants write access.
+config :jobban, auth_bypass: true

@@ -1,9 +1,10 @@
 # jobban — project context
 
 Job-search kanban for Jake (jhgaylor). Phoenix LiveView 1.8, single-user,
-deployed on the home-cloud k3s cluster at https://jobban.inevitable.fyi
-behind GitHub SSO. Generic Phoenix/LiveView guidance lives in @AGENTS.md;
-this file is the project-specific context.
+deployed on the home-cloud k3s cluster at https://jobban.inevitable.fyi —
+publicly readable, writes gated behind GitHub SSO via `/login`. Generic
+Phoenix/LiveView guidance lives in @AGENTS.md; this file is the
+project-specific context.
 
 ## Architecture (and why)
 
@@ -31,6 +32,22 @@ this file is the project-specific context.
   a key) → Greenhouse `<title>` pattern + OpenGraph meta. Runs via
   `start_async` with a skeleton card. LLM is an enhancement, never a
   dependency — any LLM failure falls back to deterministic results.
+- **Auth** (`JobbanWeb.Auth`): board is public read-only; writes unlock
+  via the cluster's existing GitHub SSO (oauth2-proxy whitelisting
+  jhgaylor) — no password, no user records, no app-specific GitHub OAuth
+  app. Only `/login` is wrapped in the `github-auth-signin`/`github-auth`
+  forwardAuth middlewares (`k8s/ingressroute.yaml`; longer Traefik rule
+  outranks the public catch-all). Traefik overwrites `x-auth-request-user`
+  with the verified login there, `AuthController` compares it to
+  `:github_user` (env `ADMIN_GITHUB_USER`, default jhgaylor) and sets a
+  session flag. Enforcement is server-side — a guard clause in `BoardLive`
+  rejects every `@write_events` event when not admin; hiding the UI
+  controls is cosmetic. Notes stay private: the read-only job modal omits
+  the `notes` field and filters `note` activities out of the render, so
+  they never hit the wire. Dev has no proxy, so `auth_bypass: true`
+  (config/dev.exs) makes `/login` grant access directly. Logout drops only
+  the app session; the `.inevitable.fyi` SSO cookie survives, so the next
+  login is a silent round-trip.
 - **JS hooks** (`assets/js/hooks.js`): `BoardColumn` (SortableJS,
   forceFallback for styled drags), `Celebrate` (canvas-confetti),
   `AutoFocus`, `AutoDismiss` (info flashes, 2.5s), `SubmitOnMetaEnter`
@@ -56,9 +73,12 @@ this file is the project-specific context.
 - Image tag is mutable `:latest` → after CI completes run
   `kubectl -n jobban rollout restart deployment/jobban`
   (`KUBECONFIG=~/.kube/config-home-cloud`).
-- Secrets: `SECRET_KEY_BASE` + `OPENROUTER_API_KEY` live SOPS-encrypted in
-  `k8s/jobban-secrets.enc.yaml` (cluster age key; `.sops.yaml` has the
-  recipient, local key at `~/.config/sops/age/keys.txt`). Edit with
+- Secrets: `SECRET_KEY_BASE` + `OPENROUTER_API_KEY`
+  live SOPS-encrypted in `k8s/jobban-secrets.enc.yaml` (cluster age key;
+  `.sops.yaml` has the recipient, local key at
+  `~/.config/sops/age/keys.txt` — on macOS pass
+  `SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt`, sops doesn't look
+  there by default). Edit with
   `sops k8s/jobban-secrets.enc.yaml`. DATABASE_URL comes from the
   CNPG-generated `jobban-pg-app` Secret. The OpenRouter key is shared
   with grocery-aid.

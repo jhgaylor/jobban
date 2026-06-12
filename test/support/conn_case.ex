@@ -35,4 +35,13 @@ defmodule JobbanWeb.ConnCase do
     Jobban.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Marks the conn's session as the logged-in admin (write access).
+
+  String key on purpose — LiveView mount reads the raw session map.
+  """
+  def log_in_admin(conn) do
+    Plug.Test.init_test_session(conn, %{"admin" => true})
+  end
 end

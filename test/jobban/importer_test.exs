@@ -26,7 +26,12 @@ defmodule Jobban.ImporterTest do
     "baseSalary" => %{
       "@type" => "MonetaryAmount",
       "currency" => "USD",
-      "value" => %{"@type" => "QuantitativeValue", "minValue" => 170_000, "maxValue" => 200_000, "unitText" => "YEAR"}
+      "value" => %{
+        "@type" => "QuantitativeValue",
+        "minValue" => 170_000,
+        "maxValue" => 200_000,
+        "unitText" => "YEAR"
+      }
     }
   }
 
@@ -102,8 +107,15 @@ defmodule Jobban.ImporterTest do
 
   describe "parse_llm_payload/1" do
     test "accepts well-formed payloads and trims" do
-      json = ~s({"company":" Fly.io ","title":"Infra Eng","location":null,"salary":"$180k","is_job_posting":true})
-      assert %{"company" => "Fly.io", "title" => "Infra Eng", "location" => nil, "salary" => "$180k"} =
+      json =
+        ~s({"company":" Fly.io ","title":"Infra Eng","location":null,"salary":"$180k","is_job_posting":true})
+
+      assert %{
+               "company" => "Fly.io",
+               "title" => "Infra Eng",
+               "location" => nil,
+               "salary" => "$180k"
+             } =
                Importer.parse_llm_payload(json)
     end
 

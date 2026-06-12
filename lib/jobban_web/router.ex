@@ -18,6 +18,9 @@ defmodule JobbanWeb.Router do
     pipe_through :browser
 
     live "/", BoardLive
+
+    get "/login", AuthController, :new
+    delete "/logout", AuthController, :delete
   end
 
   # Other scopes may use custom stacks.

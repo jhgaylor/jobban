@@ -36,3 +36,6 @@ config :phoenix,
 
 # Route importer HTTP through Req.Test stubs (no live network in tests)
 config :jobban, importer_req_options: [plug: {Req.Test, Jobban.Importer}]
+
+# Auth: GitHub login the proxy header must match
+config :jobban, github_user: "jhgaylor"
