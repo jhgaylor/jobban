@@ -11,6 +11,9 @@ board stays live across tabs and devices with no refresh.
 
 - **Five job-search stages** seeded on boot; cards carry company, role,
   posting URL, location, salary, source, excitement (1–5 stars), and notes
+- **Add a job from a link** — paste an ATS posting URL (Greenhouse, Lever,
+  Ashby, …) and the card fills itself: JSON-LD first, an optional
+  OpenRouter LLM pass for gaps, meta tags as fallback
 - **Drag-and-drop** between and within columns (SortableJS + LiveView hook)
 - **Quick-add** straight into any column, optimized for rapid entry
 - **Activity timeline** per job: stage moves are logged automatically,
