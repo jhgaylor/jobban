@@ -207,6 +207,7 @@ defmodule JobbanWeb.BoardLive do
   end
 
   defp import_error_message(:invalid_url), do: "That doesn't look like a link"
+  defp import_error_message(:blocked_host), do: "That host isn't importable"
 
   defp import_error_message(:no_job_found),
     do: "Couldn't find a job posting there — add it manually"

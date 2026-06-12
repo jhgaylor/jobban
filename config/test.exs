@@ -39,3 +39,9 @@ config :jobban, importer_req_options: [plug: {Req.Test, Jobban.Importer}]
 
 # Auth: GitHub login the proxy header must match
 config :jobban, github_user: "jhgaylor"
+
+# API yeet endpoint: tiny per-ip limit so tests can hit it deterministically;
+# host blocking off so importer stubs don't need DNS
+config :jobban,
+  yeet_rate_limits: [per_ip: {2, 60_000}, global: {100_000, 3_600_000}],
+  importer_block_private_hosts: false

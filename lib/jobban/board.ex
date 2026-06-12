@@ -34,6 +34,11 @@ defmodule Jobban.Board do
 
   def get_stage!(id), do: Repo.get!(Stage, id)
 
+  @doc "The leftmost stage (wishlist) — default landing column for API imports."
+  def first_stage do
+    Repo.one!(from s in Stage, order_by: [asc: s.position], limit: 1)
+  end
+
   ## Jobs
 
   def get_job!(id) do
@@ -53,6 +58,11 @@ defmodule Jobban.Board do
   defp preload_job(job) do
     activities_query = from a in Activity, order_by: [desc: a.inserted_at, desc: a.id]
     Repo.preload(job, [:stage, activities: activities_query])
+  end
+
+  @doc "Finds a job by its posting URL — keeps API imports idempotent."
+  def get_job_by_url(url) when is_binary(url) do
+    Repo.one(from j in Job, where: j.url == ^url, limit: 1)
   end
 
   def change_job(%Job{} = job, attrs \\ %{}), do: Job.changeset(job, attrs)

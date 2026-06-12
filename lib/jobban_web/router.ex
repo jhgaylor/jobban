@@ -23,10 +23,13 @@ defmodule JobbanWeb.Router do
     delete "/logout", AuthController, :delete
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", JobbanWeb do
-  #   pipe_through :api
-  # end
+  scope "/api", JobbanWeb.Api do
+    pipe_through :api
+
+    # Unauthenticated on purpose — see Api.JobController for the
+    # rate-limit / SSRF guardrails that make that tolerable.
+    post "/jobs", JobController, :create
+  end
 
   # Enable LiveDashboard in development
   if Application.compile_env(:jobban, :dev_routes) do

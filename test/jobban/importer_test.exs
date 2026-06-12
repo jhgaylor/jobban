@@ -149,4 +149,22 @@ defmodule Jobban.ImporterTest do
       assert {:error, :invalid_url} = Importer.import_from_url("ftp://acme.io/job")
     end
   end
+
+  describe "blocked_host?/1 (SSRF guard)" do
+    # IP literals and localhost resolve without network access, so these
+    # stay hermetic even though the guard itself is config-disabled in
+    # the test env.
+    test "blocks loopback and private address space" do
+      for host <- ~w(127.0.0.1 10.0.0.8 172.16.0.1 192.168.1.5 169.254.169.254 100.64.0.1
+                     localhost ::1 fd00::1) do
+        assert Importer.blocked_host?(host), "expected #{host} to be blocked"
+      end
+    end
+
+    test "allows public addresses and unresolvable hosts" do
+      refute Importer.blocked_host?("1.1.1.1")
+      refute Importer.blocked_host?("93.184.216.34")
+      refute Importer.blocked_host?("definitely-not-a-real-host.invalid")
+    end
+  end
 end

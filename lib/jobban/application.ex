@@ -12,6 +12,7 @@ defmodule Jobban.Application do
       Jobban.Repo,
       {DNSCluster, query: Application.get_env(:jobban, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Jobban.PubSub},
+      Jobban.RateLimit,
       # Start a worker by calling: Jobban.Worker.start_link(arg)
       # {Jobban.Worker, arg},
       # Start to serve requests, typically the last entry

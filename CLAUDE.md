@@ -48,6 +48,15 @@ project-specific context.
   (config/dev.exs) makes `/login` grant access directly. Logout drops only
   the app session; the `.inevitable.fyi` SSO cookie survives, so the next
   login is a silent round-trip.
+- **Yeet API** (`POST /api/jobs`, `JobbanWeb.Api.JobController`):
+  unauthenticated-by-design endpoint that takes `{"url": ...}` (JSON or
+  form), runs the importer, and drops the card into the leftmost stage.
+  Idempotent on posting URL (`Board.get_job_by_url/1` → `already_tracked`).
+  Guardrails for being public: `Jobban.RateLimit` (fixed-window ETS;
+  5/min per IP + 30/hr global via `:yeet_rate_limits`) and an SSRF check
+  in the importer (`blocked_host?/1` refuses private/loopback address
+  space; config `importer_block_private_hosts`, off in test so stubs
+  don't need DNS).
 - **JS hooks** (`assets/js/hooks.js`): `BoardColumn` (SortableJS,
   forceFallback for styled drags), `Celebrate` (canvas-confetti),
   `AutoFocus`, `AutoDismiss` (info flashes, 2.5s), `SubmitOnMetaEnter`

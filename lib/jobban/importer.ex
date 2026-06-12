@@ -11,8 +11,8 @@ defmodule Jobban.Importer do
     3. OpenGraph/title meta tags — last-resort guesses
 
   Returns `{:ok, attrs}` with string keys, or `{:error, reason}` where reason
-  is one of `:invalid_url`, `:no_job_found`, `{:http_error, status}`,
-  `:transport_error`.
+  is one of `:invalid_url`, `:blocked_host`, `:no_job_found`,
+  `{:http_error, status}`, `:transport_error`.
   """
 
   require Logger
@@ -26,6 +26,7 @@ defmodule Jobban.Importer do
     url = String.trim(url)
 
     with :ok <- validate_url(url),
+         :ok <- check_host(url),
          {:ok, html} <- fetch(url) do
       extract(html, url)
     end
@@ -77,6 +78,62 @@ defmodule Jobban.Importer do
         {:error, :invalid_url}
     end
   end
+
+  # SSRF guard: the importer fetches arbitrary URLs from inside the
+  # cluster and is reachable unauthenticated via /api/jobs, so refuse
+  # anything resolving to private/loopback address space. Redirects and
+  # DNS rebinding can still slip past — acceptable residual risk for a
+  # personal board. Off in test (config) so stubs don't need DNS.
+  defp check_host(url) do
+    if Application.get_env(:jobban, :importer_block_private_hosts, true) and
+         blocked_host?(URI.parse(url).host) do
+      {:error, :blocked_host}
+    else
+      :ok
+    end
+  end
+
+  @doc false
+  def blocked_host?(host) when is_binary(host) do
+    host
+    |> resolve()
+    |> Enum.any?(&private_addr?/1)
+  end
+
+  def blocked_host?(_), do: false
+
+  # Unresolvable hosts come back [] — let the fetch fail naturally.
+  defp resolve(host) do
+    charlist = String.to_charlist(host)
+
+    case :inet.getaddrs(charlist, :inet) do
+      {:ok, addrs} ->
+        addrs
+
+      {:error, _} ->
+        case :inet.getaddrs(charlist, :inet6) do
+          {:ok, addrs} -> addrs
+          {:error, _} -> []
+        end
+    end
+  end
+
+  defp private_addr?({0, _, _, _}), do: true
+  defp private_addr?({10, _, _, _}), do: true
+  defp private_addr?({100, b, _, _}) when b in 64..127, do: true
+  defp private_addr?({127, _, _, _}), do: true
+  defp private_addr?({169, 254, _, _}), do: true
+  defp private_addr?({172, b, _, _}) when b in 16..31, do: true
+  defp private_addr?({192, 168, _, _}), do: true
+  defp private_addr?({0, 0, 0, 0, 0, 0, 0, 0}), do: true
+  defp private_addr?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  defp private_addr?({a, _, _, _, _, _, _, _}) when a in 0xFC00..0xFDFF, do: true
+  defp private_addr?({a, _, _, _, _, _, _, _}) when a in 0xFE80..0xFEBF, do: true
+
+  defp private_addr?({0, 0, 0, 0, 0, 0xFFFF, ab, cd}),
+    do: private_addr?({div(ab, 256), rem(ab, 256), div(cd, 256), rem(cd, 256)})
+
+  defp private_addr?(_), do: false
 
   defp fetch(url) do
     req_options =
