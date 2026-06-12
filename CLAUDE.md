@@ -42,9 +42,10 @@ project-specific context.
   `:github_user` (env `ADMIN_GITHUB_USER`, default jhgaylor) and sets a
   session flag. Enforcement is server-side — a guard clause in `BoardLive`
   rejects every `@write_events` event when not admin; hiding the UI
-  controls is cosmetic. Notes stay private: the read-only job modal omits
-  the `notes` field and filters `note` activities out of the render, so
-  they never hit the wire. Dev has no proxy, so `auth_bypass: true`
+  controls is cosmetic. Notes and `approach` (per-job "way in" playbook —
+  route in, story to tell, referral plan; violet panel in the admin modal)
+  stay private: the read-only job modal omits both fields and filters
+  `note` activities out of the render, so they never hit the wire. Dev has no proxy, so `auth_bypass: true`
   (config/dev.exs) makes `/login` grant access directly. Logout drops only
   the app session; the `.inevitable.fyi` SSO cookie survives, so the next
   login is a silent round-trip.

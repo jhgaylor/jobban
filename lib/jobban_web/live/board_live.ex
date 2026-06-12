@@ -443,7 +443,16 @@ defmodule JobbanWeb.BoardLive do
       </div>
 
       <div class="flex items-center justify-between mt-2.5">
-        <.stars value={@job.excitement} class="text-[10px]" />
+        <div class="flex items-center gap-1.5">
+          <.stars value={@job.excitement} class="text-[10px]" />
+          <span
+            :if={@admin? && @job.approach}
+            class="text-violet-400/80"
+            title="Has a way-in playbook"
+          >
+            <.icon name="hero-map-micro" class="size-3" />
+          </span>
+        </div>
         <.stage_age job={@job} stage_slug={@stage_slug} />
       </div>
     </li>
@@ -529,9 +538,9 @@ defmodule JobbanWeb.BoardLive do
   attr :form, :any, required: true
   attr :admin?, :boolean, required: true
 
-  # Notes are private: read-only visitors get neither the notes field nor
-  # note activities — they're filtered out of the render entirely, so they
-  # never reach the wire.
+  # Notes and the way-in approach are private: read-only visitors get neither
+  # field, and note activities are filtered out of the render entirely, so
+  # they never reach the wire.
   defp job_modal(assigns) do
     activities =
       if assigns.admin?,
@@ -569,6 +578,16 @@ defmodule JobbanWeb.BoardLive do
           >
             <.icon name="hero-x-mark" class="size-5" />
           </button>
+        </div>
+
+        <div
+          :if={@admin? && @job.approach}
+          class="mx-5 mt-4 rounded-xl bg-violet-500/8 border border-violet-500/15 p-4"
+        >
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-violet-400 flex items-center gap-1.5 mb-2">
+            <.icon name="hero-map-micro" class="size-3.5" /> Way in
+          </h4>
+          <p class="text-sm leading-relaxed opacity-85 whitespace-pre-line">{@job.approach}</p>
         </div>
 
         <div :if={!@admin?} class="p-5 pt-4">
@@ -637,6 +656,12 @@ defmodule JobbanWeb.BoardLive do
             </div>
           </div>
           <.input field={@form[:notes]} type="textarea" label="Notes" rows="3" />
+          <.input
+            field={@form[:approach]}
+            type="textarea"
+            label="Way in — route, story, referral plan"
+            rows="3"
+          />
 
           <div class="flex items-center gap-2 pt-2">
             <button type="submit" class="btn btn-primary btn-sm px-6">Save</button>

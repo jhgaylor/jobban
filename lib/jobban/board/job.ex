@@ -11,6 +11,7 @@ defmodule Jobban.Board.Job do
     field :source, :string
     field :excitement, :integer, default: 3
     field :notes, :string
+    field :approach, :string
     field :applied_on, :date
     field :position, :integer, default: 0
     field :stage_entered_at, :utc_datetime
@@ -32,6 +33,7 @@ defmodule Jobban.Board.Job do
       :source,
       :excitement,
       :notes,
+      :approach,
       :applied_on,
       :stage_id
     ])

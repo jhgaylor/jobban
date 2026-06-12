@@ -163,6 +163,16 @@ defmodule JobbanWeb.BoardLiveTest do
       assert html =~ "Notes"
       assert html =~ "Talked to the hiring manager"
     end
+
+    test "modal shows the way-in approach panel", %{conn: conn, wishlist: wishlist} do
+      job = job_fixture(wishlist, %{"approach" => "Get a referral from the CTO"})
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      html = view |> element("#job-#{job.id}") |> render_click()
+
+      assert html =~ "Way in"
+      assert html =~ "Get a referral from the CTO"
+    end
   end
 
   describe "read-only (logged out)" do
@@ -201,8 +211,14 @@ defmodule JobbanWeb.BoardLiveTest do
       assert Board.stats().total == 1
     end
 
-    test "modal hides notes and the edit form", %{conn: conn, wishlist: wishlist} do
-      job = job_fixture(wishlist, %{"company" => "Fly.io", "notes" => "super secret comp notes"})
+    test "modal hides notes, approach, and the edit form", %{conn: conn, wishlist: wishlist} do
+      job =
+        job_fixture(wishlist, %{
+          "company" => "Fly.io",
+          "notes" => "super secret comp notes",
+          "approach" => "sneak in through a referral"
+        })
+
       {:ok, _} = Board.add_note(job, "private interview recap")
       {:ok, view, _html} = live(conn, ~p"/")
 
@@ -213,6 +229,8 @@ defmodule JobbanWeb.BoardLiveTest do
       refute html =~ "job-form"
       refute html =~ "super secret comp notes"
       refute html =~ "private interview recap"
+      refute html =~ "sneak in through a referral"
+      refute html =~ "Way in"
       refute html =~ "note-form"
     end
   end
