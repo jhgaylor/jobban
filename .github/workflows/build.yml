@@ -60,8 +60,11 @@ jobs:
       - name: Run tests
         run: mix test
 
+  # Build in parallel with `test` (not gated on it) — the per-arch images are
+  # pushed by digest only, untagged. The `merge` job below depends on BOTH
+  # test and build, so :latest is only tagged when tests pass: a red test
+  # still blocks the release, we just don't burn ~40s waiting serially.
   build:
-    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -122,7 +125,7 @@ jobs:
           retention-days: 1
 
   merge:
-    needs: build
+    needs: [test, build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
