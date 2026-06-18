@@ -25,6 +25,12 @@ RUN mix deps.get --only prod \
  && mix deps.compile
 
 COPY config ./config
+
+# Install the tailwind + esbuild binaries in their own layer: they depend
+# only on config/deps, so the download stays cached across code changes
+# (it used to re-run on every lib edit).
+RUN mix assets.setup
+
 COPY assets ./assets
 COPY priv ./priv
 COPY lib ./lib
@@ -34,8 +40,7 @@ COPY lib ./lib
 RUN mix compile
 
 # Build + digest static assets (tailwind + esbuild) into priv/static.
-RUN mix assets.setup \
- && mix assets.deploy
+RUN mix assets.deploy
 
 RUN mix release
 

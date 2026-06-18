@@ -188,7 +188,9 @@ defmodule JobbanWeb.LaunchpadLive do
           </div>
           <div class="min-w-0">
             <h1 class="text-xl font-bold tracking-tight leading-none">Launchpad</h1>
-            <p class="text-xs opacity-50 mt-1 truncate">which listing needs which way in</p>
+            <p class="text-xs opacity-50 mt-1 truncate">
+              {length(@jobs)} {if length(@jobs) == 1, do: "listing", else: "listings"} · which way in for each
+            </p>
           </div>
         </div>
         <div class="ml-auto flex items-center gap-2 sm:gap-3">
