@@ -43,6 +43,7 @@ config :jobban,
   fit_scoring_enabled: false,
   strategist_enabled: false,
   networking_enabled: false,
+  briefing_enabled: false,
   fit_profile: "Test candidate: staff platform engineer, remote only.",
   openrouter_req_options: [plug: {Req.Test, Jobban.LLM.OpenRouter}]
 

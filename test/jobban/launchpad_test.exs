@@ -213,6 +213,36 @@ defmodule Jobban.LaunchpadTest do
     end
   end
 
+  describe "record_brief/2" do
+    test "upserts a single briefing per job and broadcasts", %{wishlist: wishlist} do
+      job = job_fixture(wishlist)
+      Board.subscribe()
+
+      {:ok, _} =
+        Board.record_brief(job, %{
+          company_overview: "Sells X",
+          role_in_company: "Owns Y",
+          strategic_value: "Drives Z"
+        })
+
+      assert_receive {:board_changed}
+      brief = Board.get_job!(job.id).job_brief
+      assert brief.company_overview == "Sells X"
+      assert brief.generated_at
+
+      {:ok, _} = Board.record_brief(job, %{company_overview: "Updated"})
+      reloaded = Board.get_job!(job.id).job_brief
+      assert reloaded.company_overview == "Updated"
+      assert reloaded.id == brief.id
+    end
+
+    test "is a no-op for a deleted job", %{wishlist: wishlist} do
+      job = job_fixture(wishlist)
+      {:ok, _} = Board.delete_job(Board.get_job!(job.id))
+      assert {:error, :job_deleted} = Board.record_brief(job, %{company_overview: "x"})
+    end
+  end
+
   test "creating a job leaves it unassessed (strategist disabled in test)", %{wishlist: wishlist} do
     job = job_fixture(wishlist)
     assert Repo.all(from p in JobPlay, where: p.job_id == ^job.id) == []

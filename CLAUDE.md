@@ -95,6 +95,11 @@ project-specific context.
   (on-demand, not persisted) drafts outreach for a target or saved contact —
   both a LinkedIn DM and an email — shown in an overlay with copy buttons.
   Same gating as the others (`networking_enabled` + key, off in test).
+- **Briefing** (`Jobban.Briefing`, the detail's "Briefing" section): on-demand
+  per-listing explainer — what the company does, where this role likely sits,
+  and its strategic value to the company. `brief/1` generates and upserts a
+  `JobBrief` (has_one per job) via `Board.record_brief/2`. Gated
+  `briefing_enabled` + key (off in test). Prep for interviews/outreach.
 - **JS hooks** (`assets/js/hooks.js`): `BoardColumn` (SortableJS,
   forceFallback for styled drags), `Celebrate` (canvas-confetti),
   `AutoFocus`, `AutoDismiss` (info flashes, 2.5s), `SubmitOnMetaEnter`

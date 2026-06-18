@@ -9,7 +9,18 @@ defmodule Jobban.Board do
   import Ecto.Query, warn: false
 
   alias Jobban.Repo
-  alias Jobban.Board.{Activity, Contact, Job, JobPlay, NetworkingTarget, Plays, Stage, Task}
+
+  alias Jobban.Board.{
+    Activity,
+    Contact,
+    Job,
+    JobBrief,
+    JobPlay,
+    NetworkingTarget,
+    Plays,
+    Stage,
+    Task
+  }
 
   @topic "board"
 
@@ -68,7 +79,8 @@ defmodule Jobban.Board do
       tasks: tasks_query,
       contacts: contacts_query,
       job_plays: [],
-      networking_targets: targets_query
+      networking_targets: targets_query,
+      job_brief: []
     )
   end
 
@@ -217,7 +229,8 @@ defmodule Jobban.Board do
         tasks: ^tasks_query,
         contacts: ^contacts_query,
         job_plays: [],
-        networking_targets: ^targets_query
+        networking_targets: ^targets_query,
+        job_brief: []
       ]
     )
     |> Repo.all()
@@ -431,6 +444,39 @@ defmodule Jobban.Board do
               |> Repo.insert!()
             end)
           end)
+
+        broadcast_change()
+        {:ok, get_job(id)}
+    end
+  end
+
+  ## Briefing — the per-listing company/role explainer
+
+  @doc """
+  Upserts a job's briefing (one per job). `attrs` carries `company_overview`,
+  `role_in_company`, and `strategic_value`. Re-fetches by id so generating for
+  a deleted job is a clean no-op.
+  """
+  def record_brief(%Job{id: id}, attrs) when is_map(attrs) do
+    case Repo.get(Job, id) do
+      nil ->
+        {:error, :job_deleted}
+
+      _job ->
+        params =
+          attrs
+          |> Map.put(:job_id, id)
+          |> Map.put(:generated_at, DateTime.utc_now(:second))
+
+        {:ok, _} =
+          %JobBrief{}
+          |> JobBrief.changeset(params)
+          |> Repo.insert(
+            on_conflict:
+              {:replace,
+               [:company_overview, :role_in_company, :strategic_value, :generated_at, :updated_at]},
+            conflict_target: :job_id
+          )
 
         broadcast_change()
         {:ok, get_job(id)}

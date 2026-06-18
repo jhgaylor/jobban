@@ -14,6 +14,7 @@ defmodule JobbanWeb.LaunchpadLive do
 
   alias Jobban.Board
   alias Jobban.Board.Plays
+  alias Jobban.Briefing
   alias Jobban.Networking
   alias Jobban.Strategist
 
@@ -42,6 +43,7 @@ defmodule JobbanWeb.LaunchpadLive do
          contact_form: nil,
          assessing?: false,
          generating_guide?: false,
+         briefing?: false,
          drafting_for: nil,
          draft: nil
        )
@@ -72,7 +74,7 @@ defmodule JobbanWeb.LaunchpadLive do
   # client. Every mutating event funnels through this guard first.
   @write_events ~w(select_job close_detail reassess add_task toggle_task delete_task
                    add_contact validate_contact delete_contact toggle_reached
-                   generate_guide draft_outreach close_draft)
+                   generate_guide draft_outreach close_draft generate_brief)
 
   @impl true
   def handle_event(event, _params, %{assigns: %{admin?: false}} = socket)
@@ -115,6 +117,24 @@ defmodule JobbanWeb.LaunchpadLive do
 
       true ->
         {:noreply, put_flash(socket, :error, "Networking help needs an OpenRouter key")}
+    end
+  end
+
+  def handle_event("generate_brief", _params, socket) do
+    job = current_job(socket)
+
+    cond do
+      job == nil ->
+        {:noreply, socket}
+
+      Briefing.enabled?() ->
+        {:noreply,
+         socket
+         |> assign(briefing?: true)
+         |> start_async(:brief, fn -> Briefing.brief(job) end)}
+
+      true ->
+        {:noreply, put_flash(socket, :error, "Briefings need an OpenRouter key")}
     end
   end
 
@@ -250,6 +270,22 @@ defmodule JobbanWeb.LaunchpadLive do
   def handle_async(:draft, {:exit, _reason}, socket) do
     {:noreply,
      socket |> assign(drafting_for: nil) |> put_flash(:error, "Draft crashed — try again")}
+  end
+
+  def handle_async(:brief, {:ok, {:ok, _job}}, socket) do
+    {:noreply, socket |> assign(briefing?: false) |> put_flash(:info, "Briefing ready")}
+  end
+
+  def handle_async(:brief, {:ok, {:error, _reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(briefing?: false)
+     |> put_flash(:error, "Couldn't write a briefing — try again")}
+  end
+
+  def handle_async(:brief, {:exit, _reason}, socket) do
+    {:noreply,
+     socket |> assign(briefing?: false) |> put_flash(:error, "Briefing crashed — try again")}
   end
 
   ## Internals
@@ -418,6 +454,7 @@ defmodule JobbanWeb.LaunchpadLive do
         contact_form={@contact_form}
         assessing?={@assessing?}
         generating_guide?={@generating_guide?}
+        briefing?={@briefing?}
         drafting_for={@drafting_for}
         draft={@draft}
       />
@@ -462,6 +499,7 @@ defmodule JobbanWeb.LaunchpadLive do
   attr :contact_form, :any, required: true
   attr :assessing?, :boolean, required: true
   attr :generating_guide?, :boolean, required: true
+  attr :briefing?, :boolean, required: true
   attr :drafting_for, :string, default: nil
   attr :draft, :map, default: nil
 
@@ -521,6 +559,55 @@ defmodule JobbanWeb.LaunchpadLive do
             >
               <.icon name="hero-x-mark" class="size-5" />
             </button>
+          </div>
+        </div>
+
+        <%!-- Briefing: what they do, the role, why it matters --%>
+        <div class="mx-5 mt-4 rounded-xl bg-cyan-500/8 border border-cyan-500/15 p-4">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5 mb-2">
+            <.icon name="hero-book-open-micro" class="size-3.5" /> Briefing
+            <button
+              :if={Briefing.enabled?()}
+              type="button"
+              class="btn btn-ghost btn-xs ml-auto gap-1 opacity-70 hover:opacity-100 normal-case tracking-normal"
+              phx-click="generate_brief"
+              disabled={@briefing?}
+            >
+              <.icon
+                name={if @briefing?, do: "hero-arrow-path-micro", else: "hero-sparkles-micro"}
+                class={["size-3", @briefing? && "animate-spin"]}
+              />
+              {cond do
+                @briefing? -> "Writing…"
+                @job.job_brief -> "Refresh"
+                true -> "Generate"
+              end}
+            </button>
+          </h4>
+
+          <p
+            :if={is_nil(@job.job_brief) && !@briefing?}
+            class="text-sm opacity-60 italic leading-snug"
+          >
+            No briefing yet — generate a rundown of what {@job.company} does, where this role sits, and why it matters to them.
+          </p>
+
+          <div :if={@job.job_brief} class="space-y-3">
+            <.brief_part
+              :if={@job.job_brief.company_overview}
+              label="What they do"
+              text={@job.job_brief.company_overview}
+            />
+            <.brief_part
+              :if={@job.job_brief.role_in_company}
+              label="The role here"
+              text={@job.job_brief.role_in_company}
+            />
+            <.brief_part
+              :if={@job.job_brief.strategic_value}
+              label="Why it matters to them"
+              text={@job.job_brief.strategic_value}
+            />
           </div>
         </div>
 
@@ -859,6 +946,18 @@ defmodule JobbanWeb.LaunchpadLive do
       "" -> body
       s -> "Subject: #{s}\n\n#{body}"
     end
+  end
+
+  attr :label, :string, required: true
+  attr :text, :string, required: true
+
+  defp brief_part(assigns) do
+    ~H"""
+    <div>
+      <p class="font-semibold uppercase tracking-wider text-[10px] opacity-50 mb-1">{@label}</p>
+      <p class="text-sm leading-relaxed opacity-85 whitespace-pre-line">{@text}</p>
+    </div>
+    """
   end
 
   attr :job, :map, required: true

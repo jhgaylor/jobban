@@ -93,6 +93,25 @@ defmodule JobbanWeb.LaunchpadLiveTest do
       assert html =~ "Ask for 15 min of advice"
     end
 
+    test "shows a generated briefing", %{conn: conn, wishlist: wishlist} do
+      job = job_fixture(wishlist)
+
+      {:ok, _} =
+        Board.record_brief(job, %{
+          company_overview: "They run payments infrastructure.",
+          role_in_company: "Sits on the platform team.",
+          strategic_value: "Directly protects revenue."
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/launchpad")
+      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+
+      assert html =~ "Briefing"
+      assert html =~ "They run payments infrastructure."
+      assert html =~ "Why it matters to them"
+      assert html =~ "Directly protects revenue."
+    end
+
     test "adding a contact persists and shows up", %{conn: conn, wishlist: wishlist} do
       job = job_fixture(wishlist)
       {:ok, view, _html} = live(conn, ~p"/launchpad")

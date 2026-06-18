@@ -25,6 +25,7 @@ defmodule Jobban.Board.Job do
     has_many :tasks, Jobban.Board.Task
     has_many :job_plays, Jobban.Board.JobPlay
     has_many :networking_targets, Jobban.Board.NetworkingTarget
+    has_one :job_brief, Jobban.Board.JobBrief
 
     timestamps(type: :utc_datetime)
   end
