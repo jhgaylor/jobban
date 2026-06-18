@@ -20,6 +20,11 @@ defmodule Jobban.Application do
       Supervisor.child_spec({Task, &Jobban.FitScorer.backfill/0},
         id: :fit_backfill,
         restart: :temporary
+      ),
+      # One-shot: seed the standard readiness checklist onto pre-Launchpad jobs
+      Supervisor.child_spec({Task, &Jobban.Board.backfill_standard_tasks/0},
+        id: :task_backfill,
+        restart: :temporary
       )
     ]
 

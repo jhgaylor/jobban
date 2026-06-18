@@ -258,6 +258,13 @@ defmodule JobbanWeb.BoardLive do
               label={if @stats.offers == 1, do: "offer 🎉", else: "offers"}
             />
           </div>
+          <.link
+            :if={@admin?}
+            navigate={~p"/launchpad"}
+            class="btn btn-ghost btn-sm gap-1.5 opacity-60 hover:opacity-100"
+          >
+            <.icon name="hero-rocket-launch-micro" class="size-3.5" /> Launchpad
+          </.link>
           <Layouts.theme_toggle />
           <a
             :if={!@admin?}

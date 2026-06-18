@@ -30,4 +30,9 @@ defmodule Jobban.BoardFixtures do
 
     job
   end
+
+  def contact_fixture(job, attrs \\ %{}) do
+    {:ok, contact} = Board.add_contact(job, Enum.into(attrs, %{"name" => "Dana Recruiter"}))
+    contact
+  end
 end

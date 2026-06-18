@@ -8,11 +8,13 @@ project-specific context.
 
 ## Architecture (and why)
 
-- **One LiveView** (`JobbanWeb.BoardLive`) renders the whole board. All
-  mutations go through the `Jobban.Board` context, which broadcasts
-  `{:board_changed}` on the `"board"` PubSub topic; every connected view
-  reloads. Coarse-grained on purpose — a personal board is small, and
-  "reload everything" keeps move/reindex logic trivially correct.
+- **Two LiveViews** share one context. `JobbanWeb.BoardLive` renders the
+  public kanban; `JobbanWeb.LaunchpadLive` (`/launchpad`, admin-only) is the
+  prep view (see Launchpad below). All mutations go through the `Jobban.Board`
+  context, which broadcasts `{:board_changed}` on the `"board"` PubSub topic;
+  both views subscribe and reload. Coarse-grained on purpose — a personal
+  board is small, and "reload everything" keeps move/reindex logic trivially
+  correct.
 - **Stages are DB rows** (seeded idempotently in `priv/repo/seeds.exs`:
   wishlist, applied, interviewing, offer, rejected). UI accent colors map
   by slug in `BoardLive.@stage_styles` (compile-time class strings so
@@ -58,6 +60,26 @@ project-specific context.
   in the importer (`blocked_host?/1` refuses private/loopback address
   space; config `importer_block_private_hosts`, off in test so stubs
   don't need DNS).
+- **Launchpad** (`JobbanWeb.LaunchpadLive`, `/launchpad`): the private
+  wishlist→applied prep view. A prioritized worklist (`Board.list_launchpad/0`
+  — every wishlist job plus applied jobs with unfinished prep; ordered by fit,
+  excitement, then aging) where each row surfaces the single next action,
+  checklist progress, and contact count; a detail modal manages the way-in,
+  the checklist, and contacts. **Admin-only in full** — unlike the board it
+  redirects non-admins, since approach/contacts/prep are all the strategic
+  layer the board already hides. Two new per-job models in `Jobban.Board.*`:
+  `Task` (readiness checklist — standard items carry a stable `slug` from
+  `Board.standard_tasks/0`, freeform ones have nil slug; `done`/`done_at`/
+  `position`) and `Contact` (name/role/relationship/email/linkedin/notes +
+  `reached_out_at`; per-job now, deliberately shaped to later hoist into a
+  shared people table). Standard tasks are seeded in `create_job` (covers
+  manual/import/yeet) + a boot backfill (`Board.backfill_standard_tasks/0`,
+  child in `application.ex`, gated `standard_task_backfill_enabled`, off in
+  test). Dragging a card into `applied` auto-checks the `apply` step inside
+  `move_job/3` (the board move is source of truth). LLM assist
+  (`Jobban.WayInSuggester`, mirrors `FitScorer`: gated `way_in_suggester_enabled`
+  + OpenRouter key, on-demand not fire-and-forget) drafts a way-in + next steps
+  the admin reviews before saving — enhancement, never a dependency.
 - **JS hooks** (`assets/js/hooks.js`): `BoardColumn` (SortableJS,
   forceFallback for styled drags), `Celebrate` (canvas-confetti),
   `AutoFocus`, `AutoDismiss` (info flashes, 2.5s), `SubmitOnMetaEnter`
@@ -99,7 +121,9 @@ project-specific context.
 
 ## Roadmap notes
 
-- Considered and deliberately deferred: a people/CRM layer (contacts
-  linked to jobs, notes taggable to a person). Design sketch: global
-  `people` table + `job_people` join with role + optional
-  `activities.person_id`. Revisit if Jake asks "who did I talk to at X".
+- People/CRM: a first cut shipped as per-job `Contact` rows (see Launchpad).
+  Still deferred: hoisting to a *global* people layer so one person can span
+  jobs ("who did I talk to at X" across companies). Design sketch when that
+  itch returns: global `people` table + `job_people` join with role + optional
+  `activities.person_id`, backfilled from existing `contacts`. The `Contact`
+  schema was kept deliberately flat to make that migration cheap.

@@ -21,6 +21,8 @@ defmodule Jobban.Board.Job do
 
     belongs_to :stage, Jobban.Board.Stage
     has_many :activities, Jobban.Board.Activity
+    has_many :contacts, Jobban.Board.Contact
+    has_many :tasks, Jobban.Board.Task
 
     timestamps(type: :utc_datetime)
   end
