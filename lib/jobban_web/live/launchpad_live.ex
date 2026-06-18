@@ -207,23 +207,31 @@ defmodule JobbanWeb.LaunchpadLive do
       </header>
 
       <main class="flex-1 overflow-auto px-4 sm:px-6 pb-6">
-        <div class="max-w-4xl mx-auto">
+        <div class="max-w-3xl mx-auto">
           <div
             :if={@jobs != []}
-            class="rounded-2xl bg-base-100 border border-base-content/8 shadow-sm overflow-hidden"
+            class="rounded-2xl bg-base-100 border border-base-content/8 shadow-sm overflow-x-auto"
           >
-            <table class="w-full text-sm">
+            <table class="w-full table-fixed text-sm border-collapse">
               <thead>
-                <tr class="border-b border-base-content/8 text-[10px] uppercase tracking-wider opacity-50">
-                  <th class="text-left font-semibold py-2.5 pl-4">Listing</th>
+                <tr class="border-b border-base-content/10 text-[10px] uppercase tracking-wider opacity-50">
+                  <th class="text-left font-semibold py-2.5 pl-4 pr-2">Listing</th>
                   <th
-                    :for={play <- @plays}
-                    class="font-semibold px-1.5 w-12 text-center"
+                    :for={{play, idx} <- Enum.with_index(@plays)}
+                    class={[
+                      "font-semibold w-12 text-center",
+                      if(idx == 0,
+                        do: "border-l-2 border-base-content/10",
+                        else: "border-l border-base-content/5"
+                      )
+                    ]}
                     title={play.name}
                   >
                     {play.short}
                   </th>
-                  <th class="font-semibold px-3 text-right">Prep</th>
+                  <th class="font-semibold w-16 px-3 text-right border-l-2 border-base-content/10">
+                    Prep
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -231,9 +239,9 @@ defmodule JobbanWeb.LaunchpadLive do
                   :for={job <- @jobs}
                   phx-click="select_job"
                   phx-value-id={job.id}
-                  class="border-b border-base-content/5 last:border-0 cursor-pointer hover:bg-base-content/[0.03] transition-colors"
+                  class="border-b border-base-content/5 last:border-0 cursor-pointer hover:bg-base-content/[0.05] odd:bg-base-content/[0.015] transition-colors"
                 >
-                  <td class="py-2.5 pl-4 pr-2">
+                  <td class="py-2 pl-4 pr-3 max-w-0">
                     <div class="flex items-center gap-2.5 min-w-0">
                       <.company_avatar company={job.company} class="size-8 text-[11px]" />
                       <div class="min-w-0">
@@ -241,14 +249,23 @@ defmodule JobbanWeb.LaunchpadLive do
                           <span class="font-semibold truncate">{job.company}</span>
                           <.fit_badge job={job} />
                         </div>
-                        <p class="text-xs opacity-50 truncate">{route_label(job)}</p>
+                        <p class="text-xs opacity-55 truncate">{job.title}</p>
                       </div>
                     </div>
                   </td>
-                  <td :for={play <- @plays} class="text-center px-1.5">
+                  <td
+                    :for={{play, idx} <- Enum.with_index(@plays)}
+                    class={[
+                      "text-center",
+                      if(idx == 0,
+                        do: "border-l-2 border-base-content/10",
+                        else: "border-l border-base-content/5"
+                      )
+                    ]}
+                  >
                     <.play_cell job={job} slug={play.slug} />
                   </td>
-                  <td class="text-right px-3 tabular-nums text-xs opacity-60 whitespace-nowrap">
+                  <td class="text-right px-3 tabular-nums text-xs opacity-60 whitespace-nowrap border-l-2 border-base-content/10">
                     {progress_label(job)}
                   </td>
                 </tr>
@@ -307,7 +324,10 @@ defmodule JobbanWeb.LaunchpadLive do
       assign(assigns, state: state, color: leverage_color(leverage), title: jp && jp.rationale)
 
     ~H"""
-    <span class={["font-bold select-none", @color]} title={@title}>
+    <span
+      class={["inline-block py-2 text-base font-bold select-none leading-none", @color]}
+      title={@title}
+    >
       <%= case @state do %>
         <% :done -> %>
           ✓
