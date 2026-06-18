@@ -77,7 +77,8 @@ defmodule JobbanWeb.LaunchpadLiveTest do
             label: "Hiring manager",
             title_hint: "EM, Platform",
             why: "owns the req",
-            how_to_find: "Filter the company People tab by 'engineering manager'"
+            how_to_find: "Filter the company People tab by 'engineering manager'",
+            referral_path: "Ask for 15 min of advice, then ask them to flag your app"
           }
         ])
 
@@ -88,6 +89,8 @@ defmodule JobbanWeb.LaunchpadLiveTest do
       assert html =~ "Hiring manager"
       assert html =~ "EM, Platform"
       assert html =~ "Filter the company People tab"
+      assert html =~ "Turn it into a referral"
+      assert html =~ "Ask for 15 min of advice"
     end
 
     test "adding a contact persists and shows up", %{conn: conn, wishlist: wishlist} do

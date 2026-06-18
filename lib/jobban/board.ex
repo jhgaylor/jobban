@@ -425,6 +425,7 @@ defmodule Jobban.Board do
                 "title_hint" => target[:title_hint],
                 "why" => target[:why],
                 "how_to_find" => target[:how_to_find],
+                "referral_path" => target[:referral_path],
                 "position" => position
               })
               |> Repo.insert!()

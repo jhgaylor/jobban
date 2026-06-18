@@ -10,15 +10,17 @@ defmodule Jobban.NetworkingTest do
   describe "parse_guide/1" do
     test "keeps targets and trims fields" do
       json = ~s({"targets": [
-        {"label": "Hiring manager", "title_hint": " EM, Platform ", "why": "owns the req", "how_to_find": "search LinkedIn"},
+        {"label": "Hiring manager", "title_hint": " EM, Platform ", "why": "owns the req", "how_to_find": "search LinkedIn", "referral_path": "ask for advice, then a referral"},
         {"label": "Recruiter"}
       ]})
 
       assert {:ok, [hm, rec]} = Networking.parse_guide(json)
       assert hm.label == "Hiring manager"
       assert hm.title_hint == "EM, Platform"
+      assert hm.referral_path == "ask for advice, then a referral"
       assert rec.label == "Recruiter"
       assert rec.how_to_find == nil
+      assert rec.referral_path == nil
     end
 
     test "rejects payloads without a targets list" do

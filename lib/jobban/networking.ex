@@ -89,11 +89,13 @@ defmodule Jobban.Networking do
       label: trimmed(t["label"]),
       title_hint: trimmed(t["title_hint"]),
       why: trimmed(t["why"]),
-      how_to_find: trimmed(t["how_to_find"])
+      how_to_find: trimmed(t["how_to_find"]),
+      referral_path: trimmed(t["referral_path"])
     }
   end
 
-  defp normalize_target(_), do: %{label: nil, title_hint: nil, why: nil, how_to_find: nil}
+  defp normalize_target(_),
+    do: %{label: nil, title_hint: nil, why: nil, how_to_find: nil, referral_path: nil}
 
   @doc false
   def parse_draft(response) when is_binary(response) do
@@ -128,14 +130,19 @@ defmodule Jobban.Networking do
                       "Engineer on the team", "Warm connection"
       "title_hint"  — the likely job title for THIS role's context, e.g.
                       "Engineering Manager, Payments Platform" (best guess)
-      "why"         — one sentence on why this person is worth reaching
-      "how_to_find" — concrete, specific steps to find them. Name the exact
-                      moves: the LinkedIn search/filter to run (give the search
-                      text), how to infer the hiring manager (the person this
-                      role reports up to), checking the posting for a named
-                      recruiter, the company People tab filtered by title, and
-                      how to spot a warm/mutual connection. Be a teacher, not
-                      vague.
+      "why"          — one sentence on why this person is worth reaching
+      "how_to_find"  — concrete, specific steps to find them. Name the exact
+                       moves: the LinkedIn search/filter to run (give the search
+                       text), how to infer the hiring manager (the person this
+                       role reports up to), checking the posting for a named
+                       recruiter, the company People tab filtered by title, and
+                       how to spot a warm/mutual connection. Be a teacher, not
+                       vague.
+      "referral_path" — the POINT of this contact: what to actually get from
+                       them and the concrete move to turn it into a referral or
+                       a real advance (e.g. "ask for 15 min of advice, then if
+                       it clicks ask them to flag your application to the hiring
+                       manager"). One or two sentences, specific to their role.
 
     Order from easiest-first-touch to highest-value. Be specific to this
     company and role; don't invent named individuals.

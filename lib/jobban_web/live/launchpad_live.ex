@@ -587,6 +587,15 @@ defmodule JobbanWeb.LaunchpadLive do
               </div>
               <p :if={t.why} class="text-xs opacity-70 mt-1 leading-snug">{t.why}</p>
               <div
+                :if={t.referral_path}
+                class="mt-2 rounded-md bg-emerald-500/8 border border-emerald-500/15 p-2.5 text-xs leading-relaxed"
+              >
+                <p class="font-semibold uppercase tracking-wider text-[10px] text-emerald-500/80 mb-1 flex items-center gap-1">
+                  <.icon name="hero-arrow-trending-up-micro" class="size-3" /> Turn it into a referral
+                </p>
+                <p class="opacity-80 whitespace-pre-line">{t.referral_path}</p>
+              </div>
+              <div
                 :if={t.how_to_find}
                 class="mt-2 rounded-md bg-base-200/60 p-2.5 text-xs leading-relaxed"
               >
