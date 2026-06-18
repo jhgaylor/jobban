@@ -2,15 +2,19 @@ defmodule JobbanWeb.LaunchpadLive do
   use JobbanWeb, :live_view
 
   @moduledoc """
-  The private prep view for the wishlist→applied gap: a prioritized worklist of
-  jobs that still need work, each with its way-in playbook, readiness checklist,
-  and contacts. Admin-only — everything here (approach, contacts, prep) is the
-  strategic layer the public board deliberately hides, so the whole page is
-  gated rather than partially hidden.
+  The private prep view for the wishlist→applied gap. A matrix of listings ×
+  plays: for each listing the strategist rates every way-in (networking, pitch,
+  build, blog, cold apply) for leverage and auto-populates the recommended
+  plays' steps. The matrix shows which listings need which plays at a glance;
+  the detail panel works one listing's plays, steps, and contacts.
+
+  Admin-only — everything here is the strategic layer the public board hides, so
+  the whole page redirects non-admins rather than partially gating.
   """
 
   alias Jobban.Board
-  alias Jobban.WayInSuggester
+  alias Jobban.Board.Plays
+  alias Jobban.Strategist
 
   @avatar_gradients [
     "from-violet-500 to-fuchsia-500",
@@ -34,10 +38,8 @@ defmodule JobbanWeb.LaunchpadLive do
          page_title: "Launchpad",
          admin?: true,
          selected_id: nil,
-         way_in_form: nil,
          contact_form: nil,
-         suggested_steps: [],
-         suggesting?: false
+         assessing?: false
        )
        |> assign_jobs()}
     else
@@ -52,11 +54,9 @@ defmodule JobbanWeb.LaunchpadLive do
   def handle_info({:board_changed}, socket) do
     socket = assign_jobs(socket)
 
-    # If the selected job dropped off the worklist (deleted, or applied with
-    # everything checked off), close the detail panel.
     socket =
       if socket.assigns.selected_id && selected(socket.assigns) == nil do
-        assign(socket, selected_id: nil, way_in_form: nil, contact_form: nil, suggested_steps: [])
+        assign(socket, selected_id: nil, contact_form: nil)
       else
         socket
       end
@@ -66,8 +66,7 @@ defmodule JobbanWeb.LaunchpadLive do
 
   # Defense in depth — mount already redirects non-admins, but never trust the
   # client. Every mutating event funnels through this guard first.
-  @write_events ~w(select_job close_detail validate_way_in save_way_in suggest_way_in
-                   add_task toggle_task delete_task add_suggested_step
+  @write_events ~w(select_job close_detail reassess add_task toggle_task delete_task
                    add_contact validate_contact delete_contact toggle_reached)
 
   @impl true
@@ -79,53 +78,29 @@ defmodule JobbanWeb.LaunchpadLive do
   def handle_event("select_job", %{"id" => id}, socket) do
     case Board.get_job(to_int(id)) do
       nil -> {:noreply, socket}
-      job -> {:noreply, open_detail(socket, job)}
+      job -> {:noreply, assign(socket, selected_id: job.id, contact_form: blank_contact_form())}
     end
   end
 
   def handle_event("close_detail", _params, socket) do
-    {:noreply,
-     assign(socket, selected_id: nil, way_in_form: nil, contact_form: nil, suggested_steps: [])}
+    {:noreply, assign(socket, selected_id: nil, contact_form: nil)}
   end
 
-  def handle_event("validate_way_in", %{"job" => params}, socket) do
-    form =
-      current_job(socket)
-      |> Board.change_job(params)
-      |> Map.put(:action, :validate)
-      |> to_form()
-
-    {:noreply, assign(socket, way_in_form: form)}
-  end
-
-  def handle_event("save_way_in", %{"job" => params}, socket) do
-    case Board.update_job(current_job(socket), params) do
-      {:ok, job} ->
-        {:noreply,
-         socket
-         |> assign(way_in_form: to_form(Board.change_job(job)), suggested_steps: [])
-         |> put_flash(:info, "Way in saved")}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, way_in_form: to_form(changeset))}
-    end
-  end
-
-  def handle_event("suggest_way_in", _params, socket) do
+  def handle_event("reassess", _params, socket) do
     job = current_job(socket)
 
     cond do
       job == nil ->
         {:noreply, socket}
 
-      WayInSuggester.enabled?() ->
+      Strategist.enabled?() ->
         {:noreply,
          socket
-         |> assign(suggesting?: true)
-         |> start_async(:suggest, fn -> WayInSuggester.suggest(job) end)}
+         |> assign(assessing?: true)
+         |> start_async(:assess, fn -> Strategist.assess(job) end)}
 
       true ->
-        {:noreply, put_flash(socket, :error, "AI suggestions need an OpenRouter key")}
+        {:noreply, put_flash(socket, :error, "The strategist needs an OpenRouter key")}
     end
   end
 
@@ -147,18 +122,10 @@ defmodule JobbanWeb.LaunchpadLive do
     {:noreply, socket}
   end
 
-  def handle_event("add_suggested_step", %{"title" => title}, socket) do
-    {:ok, _} = Board.add_task(current_job(socket), title)
-    {:noreply, update(socket, :suggested_steps, &List.delete(&1, title))}
-  end
-
   def handle_event("add_contact", %{"contact" => params}, socket) do
     case Board.add_contact(current_job(socket), params) do
-      {:ok, _contact} ->
-        {:noreply, assign(socket, contact_form: blank_contact_form())}
-
-      {:error, changeset} ->
-        {:noreply, assign(socket, contact_form: to_form(changeset))}
+      {:ok, _contact} -> {:noreply, assign(socket, contact_form: blank_contact_form())}
+      {:error, changeset} -> {:noreply, assign(socket, contact_form: to_form(changeset))}
     end
   end
 
@@ -183,58 +150,34 @@ defmodule JobbanWeb.LaunchpadLive do
   end
 
   @impl true
-  def handle_async(:suggest, {:ok, {:ok, %{approach: approach, steps: steps}}}, socket) do
-    form =
-      case current_job(socket) do
-        nil -> socket.assigns.way_in_form
-        job -> to_form(Board.change_job(job, %{"approach" => approach}))
-      end
-
-    {:noreply,
-     socket
-     |> assign(suggesting?: false, way_in_form: form, suggested_steps: steps)
-     |> put_flash(:info, "Draft ready — review, tweak, then save")}
+  def handle_async(:assess, {:ok, {:ok, _job}}, socket) do
+    {:noreply, socket |> assign(assessing?: false) |> put_flash(:info, "Re-assessed the plays")}
   end
 
-  def handle_async(:suggest, {:ok, {:error, _reason}}, socket) do
+  def handle_async(:assess, {:ok, {:error, _reason}}, socket) do
     {:noreply,
-     socket
-     |> assign(suggesting?: false)
-     |> put_flash(:error, "Couldn't draft a way in — write it by hand")}
+     socket |> assign(assessing?: false) |> put_flash(:error, "Couldn't re-assess this listing")}
   end
 
-  def handle_async(:suggest, {:exit, _reason}, socket) do
+  def handle_async(:assess, {:exit, _reason}, socket) do
     {:noreply,
-     socket
-     |> assign(suggesting?: false)
-     |> put_flash(:error, "AI suggestion crashed — write it by hand")}
+     socket |> assign(assessing?: false) |> put_flash(:error, "Assessment crashed — try again")}
   end
 
   ## Internals
 
   defp assign_jobs(socket), do: assign(socket, jobs: Board.list_launchpad())
 
-  defp open_detail(socket, job) do
-    assign(socket,
-      selected_id: job.id,
-      way_in_form: to_form(Board.change_job(job)),
-      contact_form: blank_contact_form(),
-      suggested_steps: []
-    )
-  end
-
   defp current_job(socket), do: Board.get_job(socket.assigns.selected_id)
 
-  defp blank_contact_form do
-    to_form(Board.change_contact(%Jobban.Board.Contact{}))
-  end
+  defp blank_contact_form, do: to_form(Board.change_contact(%Jobban.Board.Contact{}))
 
   defp selected(%{selected_id: nil}), do: nil
   defp selected(%{selected_id: id, jobs: jobs}), do: Enum.find(jobs, &(&1.id == id))
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :job, selected(assigns))
+    assigns = assign(assigns, job: selected(assigns), plays: Plays.all())
 
     ~H"""
     <div class="h-dvh flex flex-col bg-board overflow-hidden">
@@ -245,9 +188,7 @@ defmodule JobbanWeb.LaunchpadLive do
           </div>
           <div class="min-w-0">
             <h1 class="text-xl font-bold tracking-tight leading-none">Launchpad</h1>
-            <p class="text-xs opacity-50 mt-1 truncate">
-              get every wishlist into the system the right way
-            </p>
+            <p class="text-xs opacity-50 mt-1 truncate">which listing needs which way in</p>
           </div>
         </div>
         <div class="ml-auto flex items-center gap-2 sm:gap-3">
@@ -265,13 +206,80 @@ defmodule JobbanWeb.LaunchpadLive do
         </div>
       </header>
 
-      <main class="flex-1 overflow-y-auto px-4 sm:px-6 pb-6">
-        <div class="max-w-3xl mx-auto space-y-2.5">
-          <.job_row :for={job <- @jobs} job={job} />
+      <main class="flex-1 overflow-auto px-4 sm:px-6 pb-6">
+        <div class="max-w-4xl mx-auto">
+          <div
+            :if={@jobs != []}
+            class="rounded-2xl bg-base-100 border border-base-content/8 shadow-sm overflow-hidden"
+          >
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-base-content/8 text-[10px] uppercase tracking-wider opacity-50">
+                  <th class="text-left font-semibold py-2.5 pl-4">Listing</th>
+                  <th
+                    :for={play <- @plays}
+                    class="font-semibold px-1.5 w-12 text-center"
+                    title={play.name}
+                  >
+                    {play.short}
+                  </th>
+                  <th class="font-semibold px-3 text-right">Prep</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  :for={job <- @jobs}
+                  phx-click="select_job"
+                  phx-value-id={job.id}
+                  class="border-b border-base-content/5 last:border-0 cursor-pointer hover:bg-base-content/[0.03] transition-colors"
+                >
+                  <td class="py-2.5 pl-4 pr-2">
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <.company_avatar company={job.company} class="size-8 text-[11px]" />
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                          <span class="font-semibold truncate">{job.company}</span>
+                          <.fit_badge job={job} />
+                        </div>
+                        <p class="text-xs opacity-50 truncate">{route_label(job)}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td :for={play <- @plays} class="text-center px-1.5">
+                    <.play_cell job={job} slug={play.slug} />
+                  </td>
+                  <td class="text-right px-3 tabular-nums text-xs opacity-60 whitespace-nowrap">
+                    {progress_label(job)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
           <div :if={@jobs == []} class="text-center py-20 opacity-50">
             <.icon name="hero-check-circle" class="size-10 mx-auto mb-3 opacity-40" />
             <p class="text-sm">Nothing waiting on prep — every wishlist is launched.</p>
+          </div>
+
+          <div
+            :if={@jobs != []}
+            class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 px-1 text-[11px] opacity-50"
+          >
+            <span class="flex items-center gap-1">
+              <span class="text-emerald-400 font-bold">●</span> high
+            </span>
+            <span class="flex items-center gap-1">
+              <span class="text-amber-400 font-bold">●</span> medium
+            </span>
+            <span class="flex items-center gap-1">
+              <span class="text-zinc-400 font-bold">●</span> low
+            </span>
+            <span class="flex items-center gap-1"><span class="font-bold">◐</span> in progress</span>
+            <span class="flex items-center gap-1">
+              <span class="text-emerald-400 font-bold">✓</span> done
+            </span>
+            <span class="flex items-center gap-1"><span>·</span> skip</span>
+            <span class="flex items-center gap-1"><span>–</span> not assessed</span>
           </div>
         </div>
       </main>
@@ -279,10 +287,9 @@ defmodule JobbanWeb.LaunchpadLive do
       <.detail
         :if={@job}
         job={@job}
-        way_in_form={@way_in_form}
+        plays={@plays}
         contact_form={@contact_form}
-        suggested_steps={@suggested_steps}
-        suggesting?={@suggesting?}
+        assessing?={@assessing?}
       />
       <Layouts.flash_group flash={@flash} />
     </div>
@@ -290,72 +297,37 @@ defmodule JobbanWeb.LaunchpadLive do
   end
 
   attr :job, :map, required: true
+  attr :slug, :string, required: true
 
-  defp job_row(assigns) do
-    {done, total} = progress(assigns.job)
-    assigns = assign(assigns, done: done, total: total, next: next_step(assigns.job))
+  defp play_cell(assigns) do
+    {state, leverage} = play_state(assigns.job, assigns.slug)
+    jp = Enum.find(assigns.job.job_plays, &(&1.slug == assigns.slug))
+
+    assigns =
+      assign(assigns, state: state, color: leverage_color(leverage), title: jp && jp.rationale)
 
     ~H"""
-    <button
-      type="button"
-      phx-click="select_job"
-      phx-value-id={@job.id}
-      class="w-full text-left group rounded-2xl bg-base-100 border border-base-content/8 p-4 shadow-sm hover:shadow-lg hover:-translate-y-0.5 hover:border-base-content/15 transition-all duration-200"
-    >
-      <div class="flex items-start gap-3">
-        <.company_avatar company={@job.company} class="size-10 text-sm" />
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2 min-w-0">
-            <p class="font-semibold text-sm truncate">{@job.company}</p>
-            <.stage_chip slug={@job.stage.slug} name={@job.stage.name} />
-          </div>
-          <p class="text-xs opacity-70 truncate mt-0.5">{@job.title}</p>
-        </div>
-        <div class="flex items-center gap-1.5 shrink-0">
-          <.fit_badge job={@job} />
-          <.stars value={@job.excitement} class="text-[10px]" />
-        </div>
-      </div>
-
-      <div class="flex items-center gap-3 mt-3">
-        <div class="flex-1 min-w-0">
-          <div :if={@next} class="flex items-center gap-1.5 text-xs">
-            <span class="font-semibold uppercase tracking-wider text-sky-500 text-[10px]">Next</span>
-            <span class="truncate opacity-80">{@next}</span>
-          </div>
-          <div :if={!@next} class="flex items-center gap-1.5 text-xs text-emerald-500">
-            <.icon name="hero-check-circle-micro" class="size-3.5" />
-            <span class="opacity-90">Prep complete</span>
-          </div>
-        </div>
-
-        <span
-          :if={@job.contacts != []}
-          class="badge badge-ghost badge-xs gap-1 py-2"
-          title={"#{length(@job.contacts)} contact(s)"}
-        >
-          <.icon name="hero-users-micro" class="size-3 opacity-60" />{length(@job.contacts)}
-        </span>
-
-        <div class="flex items-center gap-2 shrink-0">
-          <div class="w-16 h-1.5 rounded-full bg-base-content/10 overflow-hidden">
-            <div
-              class="h-full bg-emerald-500/70 rounded-full"
-              style={"width: #{pct(@done, @total)}%"}
-            />
-          </div>
-          <span class="text-[10px] font-semibold tabular-nums opacity-60">{@done}/{@total}</span>
-        </div>
-      </div>
-    </button>
+    <span class={["font-bold select-none", @color]} title={@title}>
+      <%= case @state do %>
+        <% :done -> %>
+          ✓
+        <% :in_progress -> %>
+          ◐
+        <% :recommended -> %>
+          ●
+        <% :skip -> %>
+          <span class="opacity-30">·</span>
+        <% :unassessed -> %>
+          <span class="opacity-30">–</span>
+      <% end %>
+    </span>
     """
   end
 
   attr :job, :map, required: true
-  attr :way_in_form, :any, required: true
+  attr :plays, :list, required: true
   attr :contact_form, :any, required: true
-  attr :suggested_steps, :list, required: true
-  attr :suggesting?, :boolean, required: true
+  attr :assessing?, :boolean, required: true
 
   defp detail(assigns) do
     ~H"""
@@ -375,8 +347,10 @@ defmodule JobbanWeb.LaunchpadLive do
           <div class="min-w-0 flex-1">
             <h3 class="font-bold text-lg leading-tight truncate">{@job.company}</h3>
             <p class="text-sm opacity-70 truncate">{@job.title}</p>
-            <p class="text-xs opacity-50 mt-1 flex items-center gap-1.5">
-              <.stage_chip slug={@job.stage.slug} name={@job.stage.name} />
+            <p class="text-xs opacity-50 mt-1 flex items-center gap-1.5 flex-wrap">
+              <span class="badge badge-xs border-0 bg-sky-500/15 text-sky-400 font-medium">
+                {route_label(@job)}
+              </span>
               <span>· {aging_label(@job)}</span>
               <a
                 :if={@job.url}
@@ -389,101 +363,53 @@ defmodule JobbanWeb.LaunchpadLive do
               </a>
             </p>
           </div>
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm btn-circle"
-            phx-click="close_detail"
-            aria-label="Close"
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
-
-        <%!-- Way in --%>
-        <div class="mx-5 mt-4 rounded-xl bg-violet-500/8 border border-violet-500/15 p-4">
-          <h4 class="text-xs font-semibold uppercase tracking-wider text-violet-400 flex items-center gap-1.5 mb-2">
-            <.icon name="hero-map-micro" class="size-3.5" /> Way in
+          <div class="flex items-center gap-1">
             <button
-              :if={WayInSuggester.enabled?()}
+              :if={Strategist.enabled?()}
               type="button"
-              class="btn btn-ghost btn-xs ml-auto gap-1 opacity-60 hover:opacity-100"
-              phx-click="suggest_way_in"
-              disabled={@suggesting?}
+              class="btn btn-ghost btn-xs gap-1 opacity-60 hover:opacity-100"
+              phx-click="reassess"
+              disabled={@assessing?}
+              title="Re-run the strategist (replaces auto-generated steps)"
             >
               <.icon
-                name={if @suggesting?, do: "hero-arrow-path-micro", else: "hero-sparkles-micro"}
-                class={["size-3", @suggesting? && "animate-spin"]}
-              /> {if @suggesting?, do: "Drafting…", else: "Suggest"}
+                name={if @assessing?, do: "hero-arrow-path-micro", else: "hero-sparkles-micro"}
+                class={["size-3.5", @assessing? && "animate-spin"]}
+              /> {if @assessing?, do: "Assessing…", else: "Re-assess"}
             </button>
-          </h4>
-          <.form for={@way_in_form} phx-change="validate_way_in" phx-submit="save_way_in">
-            <textarea
-              id="way-in-body"
-              name={@way_in_form[:approach].name}
-              rows="5"
-              placeholder="Route in, the story to tell, the referral plan…"
-              class="textarea textarea-sm w-full leading-snug bg-base-100"
-            >{Phoenix.HTML.Form.normalize_value("textarea", @way_in_form[:approach].value)}</textarea>
-            <div
-              :if={@suggested_steps != []}
-              class="flex flex-wrap gap-1.5 mt-2.5"
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm btn-circle"
+              phx-click="close_detail"
+              aria-label="Close"
             >
-              <span class="text-[10px] uppercase tracking-wider opacity-50 self-center">
-                Suggested steps:
-              </span>
-              <button
-                :for={step <- @suggested_steps}
-                type="button"
-                phx-click="add_suggested_step"
-                phx-value-title={step}
-                class="badge badge-sm gap-1 bg-violet-500/15 text-violet-400 border-0 hover:bg-violet-500/25"
-              >
-                <.icon name="hero-plus-micro" class="size-3" />{step}
-              </button>
-            </div>
-            <div class="flex justify-end mt-2.5">
-              <button type="submit" class="btn btn-primary btn-sm px-5">Save way in</button>
-            </div>
-          </.form>
+              <.icon name="hero-x-mark" class="size-5" />
+            </button>
+          </div>
         </div>
 
-        <%!-- Checklist --%>
-        <div class="mx-5 mt-4 rounded-xl bg-emerald-500/8 border border-emerald-500/15 p-4">
-          <h4 class="text-xs font-semibold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5 mb-3">
-            <.icon name="hero-clipboard-document-check-micro" class="size-3.5" /> Checklist
-            <span class="ml-auto tabular-nums opacity-70 normal-case tracking-normal">
-              {elem(progress(@job), 0)}/{elem(progress(@job), 1)} done
-            </span>
+        <p
+          :if={@job.job_plays == []}
+          class="mx-5 mt-4 rounded-xl bg-base-200/60 p-4 text-sm opacity-60 italic"
+        >
+          Not assessed yet — {if Strategist.enabled?(),
+            do: "hit Re-assess to have the strategist rate the plays.",
+            else: "set an OpenRouter key to enable the strategist."}
+        </p>
+
+        <%!-- One card per play, in catalog order --%>
+        <.play_card :for={play <- @plays} job={@job} play={play} />
+
+        <%!-- Freeform steps not tied to a play --%>
+        <div class="mx-5 mt-4 rounded-xl bg-base-200/50 border border-base-content/8 p-4">
+          <h4 class="text-xs font-semibold uppercase tracking-wider opacity-50 flex items-center gap-1.5 mb-3">
+            <.icon name="hero-plus-circle-micro" class="size-3.5" /> Other steps
           </h4>
-
-          <ul class="space-y-1.5">
-            <li :for={task <- @job.tasks} class="flex items-center gap-2.5 group/task">
-              <input
-                type="checkbox"
-                checked={task.done}
-                phx-click="toggle_task"
-                phx-value-id={task.id}
-                class="checkbox checkbox-xs checkbox-success"
-              />
-              <span class={["text-sm flex-1 leading-snug", task.done && "line-through opacity-40"]}>
-                {task.title}
-              </span>
-              <button
-                type="button"
-                phx-click="delete_task"
-                phx-value-id={task.id}
-                class="opacity-0 group-hover/task:opacity-50 hover:!opacity-100 transition-opacity"
-                aria-label="Delete task"
-              >
-                <.icon name="hero-x-mark-micro" class="size-3.5" />
-              </button>
-            </li>
-          </ul>
-
+          <.task_list tasks={freeform_tasks(@job)} empty="No extra steps." />
           <form phx-submit="add_task" class="flex gap-2 mt-3">
             <input
               name="task[title]"
-              placeholder="Add a step…"
+              placeholder="Add your own step…"
               autocomplete="off"
               class="input input-xs flex-1 bg-base-100"
             />
@@ -627,23 +553,72 @@ defmodule JobbanWeb.LaunchpadLive do
     """
   end
 
-  ## Presentation helpers
+  attr :job, :map, required: true
+  attr :play, :map, required: true
 
-  attr :slug, :string, required: true
-  attr :name, :string, required: true
-
-  defp stage_chip(assigns) do
-    color =
-      case assigns.slug do
-        "wishlist" -> "bg-violet-500/15 text-violet-400"
-        "applied" -> "bg-sky-500/15 text-sky-400"
-        _ -> "bg-base-content/10 opacity-70"
-      end
-
-    assigns = assign(assigns, :color, color)
+  defp play_card(assigns) do
+    jp = Enum.find(assigns.job.job_plays, &(&1.slug == assigns.play.slug))
+    tasks = tasks_for(assigns.job, assigns.play.slug)
+    assigns = assign(assigns, jp: jp, tasks: tasks)
 
     ~H"""
-    <span class={["badge badge-xs border-0 font-medium shrink-0", @color]}>{@name}</span>
+    <div :if={@jp} class={["mx-5 mt-4 rounded-xl border p-4", play_panel_class(@jp.leverage)]}>
+      <div class="flex items-center gap-2 mb-1.5">
+        <h4 class="text-sm font-semibold flex items-center gap-1.5">{@play.name}</h4>
+        <.leverage_badge leverage={@jp.leverage} />
+      </div>
+      <p :if={@jp.rationale} class="text-xs opacity-70 leading-snug mb-2.5">{@jp.rationale}</p>
+
+      <.task_list :if={@tasks != []} tasks={@tasks} empty="" />
+      <p :if={@tasks == [] && @jp.leverage != "skip"} class="text-xs opacity-40 italic">
+        No specific steps suggested.
+      </p>
+    </div>
+    """
+  end
+
+  attr :tasks, :list, required: true
+  attr :empty, :string, default: ""
+
+  defp task_list(assigns) do
+    ~H"""
+    <ul class="space-y-1.5">
+      <li :for={task <- @tasks} class="flex items-center gap-2.5 group/task">
+        <input
+          type="checkbox"
+          checked={task.done}
+          phx-click="toggle_task"
+          phx-value-id={task.id}
+          class="checkbox checkbox-xs checkbox-success"
+        />
+        <span class={["text-sm flex-1 leading-snug", task.done && "line-through opacity-40"]}>
+          {task.title}
+        </span>
+        <button
+          type="button"
+          phx-click="delete_task"
+          phx-value-id={task.id}
+          class="opacity-0 group-hover/task:opacity-50 hover:!opacity-100 transition-opacity"
+          aria-label="Delete step"
+        >
+          <.icon name="hero-x-mark-micro" class="size-3.5" />
+        </button>
+      </li>
+    </ul>
+    <p :if={@tasks == [] && @empty != ""} class="text-xs opacity-40 italic">{@empty}</p>
+    """
+  end
+
+  attr :leverage, :string, required: true
+
+  defp leverage_badge(assigns) do
+    ~H"""
+    <span class={[
+      "badge badge-xs border-0 font-semibold uppercase tracking-wide",
+      leverage_badge_class(@leverage)
+    ]}>
+      {@leverage}
+    </span>
     """
   end
 
@@ -663,56 +638,84 @@ defmodule JobbanWeb.LaunchpadLive do
   end
 
   attr :job, :map, required: true
-  attr :class, :string, default: ""
 
   defp fit_badge(assigns) do
     ~H"""
     <span
       :if={@job.fit_score}
       class={[
-        "badge badge-xs gap-1 border-0 font-semibold tabular-nums py-2",
-        fit_color(@job.fit_score),
-        @class
+        "badge badge-xs gap-1 border-0 font-semibold tabular-nums shrink-0",
+        fit_color(@job.fit_score)
       ]}
       title={@job.fit_summary}
       aria-label={"Fit #{@job.fit_score} of 5"}
     >
-      <.icon name="hero-scale-micro" class="size-3" /> fit {@job.fit_score}
+      fit {@job.fit_score}
     </span>
     """
   end
+
+  ## Logic helpers
+
+  defp play_state(job, slug) do
+    jp = Enum.find(job.job_plays, &(&1.slug == slug))
+    tasks = tasks_for(job, slug)
+
+    state =
+      cond do
+        jp == nil -> :unassessed
+        jp.leverage == "skip" -> :skip
+        tasks != [] and Enum.all?(tasks, & &1.done) -> :done
+        Enum.any?(tasks, & &1.done) -> :in_progress
+        true -> :recommended
+      end
+
+    {state, jp && jp.leverage}
+  end
+
+  defp route_label(job) do
+    recommended =
+      Enum.filter(job.job_plays, &(Plays.recommended?(&1.leverage) and &1.slug != "apply"))
+
+    cond do
+      job.job_plays == [] -> "Not assessed yet"
+      recommended == [] -> "Front door — cold apply"
+      true -> "Side door — " <> Enum.map_join(recommended, ", ", &play_name(&1.slug))
+    end
+  end
+
+  defp tasks_for(job, slug), do: Enum.filter(job.tasks, &(&1.play_slug == slug))
+  defp freeform_tasks(job), do: Enum.filter(job.tasks, &is_nil(&1.play_slug))
+
+  defp progress_label(job) do
+    total = length(job.tasks)
+    done = Enum.count(job.tasks, & &1.done)
+    "#{done}/#{total}"
+  end
+
+  defp play_name(slug) do
+    case Plays.get(slug) do
+      nil -> slug
+      play -> play.name
+    end
+  end
+
+  defp leverage_color("high"), do: "text-emerald-400"
+  defp leverage_color("medium"), do: "text-amber-400"
+  defp leverage_color("low"), do: "text-zinc-400"
+  defp leverage_color(_), do: "opacity-30"
+
+  defp leverage_badge_class("high"), do: "bg-emerald-500/15 text-emerald-400"
+  defp leverage_badge_class("medium"), do: "bg-amber-500/15 text-amber-400"
+  defp leverage_badge_class("low"), do: "bg-zinc-500/15 text-zinc-400"
+  defp leverage_badge_class(_), do: "bg-base-content/10 opacity-50"
+
+  defp play_panel_class("skip"), do: "border-base-content/8 bg-base-200/40 opacity-60"
+  defp play_panel_class(_), do: "border-base-content/10 bg-base-200/50"
 
   defp fit_color(score) when score >= 4, do: "bg-emerald-500/15 text-emerald-500"
   defp fit_color(3), do: "bg-amber-500/15 text-amber-500"
   defp fit_color(_), do: "bg-rose-500/15 text-rose-500"
-
-  attr :value, :integer, required: true
-  attr :class, :string, default: ""
-
-  defp stars(assigns) do
-    ~H"""
-    <span class={["tracking-tight select-none", @class]} aria-label={"Excitement #{@value} of 5"}>
-      <span class="text-amber-400">{String.duplicate("★", @value)}</span>
-      <span class="opacity-25">{String.duplicate("★", 5 - @value)}</span>
-    </span>
-    """
-  end
-
-  defp progress(job) do
-    total = length(job.tasks)
-    done = Enum.count(job.tasks, & &1.done)
-    {done, total}
-  end
-
-  defp next_step(job) do
-    case Enum.find(job.tasks, &(not &1.done)) do
-      nil -> nil
-      task -> task.title
-    end
-  end
-
-  defp pct(_done, 0), do: 0
-  defp pct(done, total), do: round(done / total * 100)
 
   defp aging_label(job) do
     case DateTime.diff(DateTime.utc_now(), job.stage_entered_at, :day) do

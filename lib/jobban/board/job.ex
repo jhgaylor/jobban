@@ -23,6 +23,7 @@ defmodule Jobban.Board.Job do
     has_many :activities, Jobban.Board.Activity
     has_many :contacts, Jobban.Board.Contact
     has_many :tasks, Jobban.Board.Task
+    has_many :job_plays, Jobban.Board.JobPlay
 
     timestamps(type: :utc_datetime)
   end

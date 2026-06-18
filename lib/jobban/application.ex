@@ -21,9 +21,9 @@ defmodule Jobban.Application do
         id: :fit_backfill,
         restart: :temporary
       ),
-      # One-shot: seed the standard readiness checklist onto pre-Launchpad jobs
-      Supervisor.child_spec({Task, &Jobban.Board.backfill_standard_tasks/0},
-        id: :task_backfill,
+      # One-shot retroactive play assessment; exits immediately when disabled
+      Supervisor.child_spec({Task, &Jobban.Strategist.backfill/0},
+        id: :strategist_backfill,
         restart: :temporary
       )
     ]

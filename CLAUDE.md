@@ -61,25 +61,30 @@ project-specific context.
   space; config `importer_block_private_hosts`, off in test so stubs
   don't need DNS).
 - **Launchpad** (`JobbanWeb.LaunchpadLive`, `/launchpad`): the private
-  wishlist→applied prep view. A prioritized worklist (`Board.list_launchpad/0`
-  — every wishlist job plus applied jobs with unfinished prep; ordered by fit,
-  excitement, then aging) where each row surfaces the single next action,
-  checklist progress, and contact count; a detail modal manages the way-in,
-  the checklist, and contacts. **Admin-only in full** — unlike the board it
-  redirects non-admins, since approach/contacts/prep are all the strategic
-  layer the board already hides. Two new per-job models in `Jobban.Board.*`:
-  `Task` (readiness checklist — standard items carry a stable `slug` from
-  `Board.standard_tasks/0`, freeform ones have nil slug; `done`/`done_at`/
-  `position`) and `Contact` (name/role/relationship/email/linkedin/notes +
-  `reached_out_at`; per-job now, deliberately shaped to later hoist into a
-  shared people table). Standard tasks are seeded in `create_job` (covers
-  manual/import/yeet) + a boot backfill (`Board.backfill_standard_tasks/0`,
-  child in `application.ex`, gated `standard_task_backfill_enabled`, off in
-  test). Dragging a card into `applied` auto-checks the `apply` step inside
-  `move_job/3` (the board move is source of truth). LLM assist
-  (`Jobban.WayInSuggester`, mirrors `FitScorer`: gated `way_in_suggester_enabled`
-  + OpenRouter key, on-demand not fire-and-forget) drafts a way-in + next steps
-  the admin reviews before saving — enhancement, never a dependency.
+  wishlist→applied prep view, built around **plays** — the ways into a company
+  beyond the front door. The catalog is codified in `Jobban.Board.Plays`
+  (`networking`, `pitch`, `build`, `blog`, `apply`; add one there and it flows
+  through the strategist prompt, matrix columns, and task generation). The main
+  view is a **matrix** (`Board.list_launchpad/0` rows — every wishlist job plus
+  applied jobs with unfinished prep, ordered by fit/excitement/aging × play
+  columns); each cell's glyph is derived from the play's leverage + its steps'
+  completion. A detail modal works one listing: a card per play (leverage badge
+  + rationale + its steps), freeform steps, and contacts. **Admin-only in
+  full** — redirects non-admins, since plays/contacts/prep are the strategic
+  layer the board hides. Three per-job models in `Jobban.Board.*`: `JobPlay`
+  (one per job×play — `leverage` high/medium/low/skip + `rationale` +
+  `assessed_at`), `Task` (a prep step; steps from a recommended play carry that
+  `play_slug`, freeform ones nil; `done`/`done_at`/`position`), and `Contact`
+  (name/role/relationship/email/linkedin/notes + `reached_out_at`; per-job,
+  shaped to later hoist into a shared people table). `Jobban.Strategist`
+  (mirrors `FitScorer`: gated `strategist_enabled` + OpenRouter key,
+  fire-and-forget on create + boot backfill + on-demand re-assess) makes one
+  LLM call rating every play and returning steps; `Board.record_assessment/2`
+  upserts the `JobPlay` rows and **regenerates** the auto-populated tasks
+  (wipes machine steps, keeps freeform). Dragging a card into `applied`
+  auto-checks the cold-apply play's steps inside `move_job/3` (the board move
+  is source of truth). LLM is always an enhancement — an unassessed job just
+  shows a blank matrix row until assessed.
 - **JS hooks** (`assets/js/hooks.js`): `BoardColumn` (SortableJS,
   forceFallback for styled drags), `Celebrate` (canvas-confetti),
   `AutoFocus`, `AutoDismiss` (info flashes, 2.5s), `SubmitOnMetaEnter`

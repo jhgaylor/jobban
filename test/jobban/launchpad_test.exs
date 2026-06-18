@@ -4,106 +4,139 @@ defmodule Jobban.LaunchpadTest do
   import Jobban.BoardFixtures
 
   alias Jobban.Board
+  alias Jobban.Board.{JobPlay, Task}
 
   setup do
     [wishlist, applied, _interviewing, _offer, rejected] = stages_fixture()
     %{wishlist: wishlist, applied: applied, rejected: rejected}
   end
 
-  describe "standard checklist seeding" do
-    test "create_job seeds the standard readiness checklist", %{wishlist: wishlist} do
-      job = job_fixture(wishlist)
-      slugs = job_slugs(job.id)
+  defp assessment(slug, leverage, steps \\ []) do
+    %{slug: slug, leverage: leverage, rationale: "because #{slug}", steps: steps}
+  end
 
-      assert slugs == Enum.map(Board.standard_tasks(), &elem(&1, 0))
+  describe "record_assessment/2" do
+    test "stores play leverage and auto-populates recommended plays' steps", %{wishlist: wishlist} do
+      job = job_fixture(wishlist)
+
+      {:ok, _} =
+        Board.record_assessment(job, [
+          assessment("networking", "high", ["Ask Dana for an intro", "DM the hiring manager"]),
+          assessment("build", "medium", ["Ship a small demo"]),
+          assessment("blog", "skip"),
+          assessment("apply", "low", ["Submit the application"])
+        ])
+
+      reloaded = Board.get_job!(job.id)
+
+      leverages = Map.new(reloaded.job_plays, &{&1.slug, &1.leverage})
+
+      assert leverages == %{
+               "networking" => "high",
+               "build" => "medium",
+               "blog" => "skip",
+               "apply" => "low"
+             }
+
+      # steps generated only for non-skip plays
+      titles = Enum.map(reloaded.tasks, & &1.title)
+      assert "Ask Dana for an intro" in titles
+      assert "Ship a small demo" in titles
+      refute Enum.any?(reloaded.tasks, &(&1.play_slug == "blog"))
+      assert Enum.find(reloaded.tasks, &(&1.title == "Ship a small demo")).play_slug == "build"
     end
 
-    test "seed_standard_tasks is idempotent", %{wishlist: wishlist} do
+    test "re-assessing replaces machine steps but keeps freeform ones", %{wishlist: wishlist} do
       job = job_fixture(wishlist)
-      before = length(Board.get_job!(job.id).tasks)
+      {:ok, _} = Board.record_assessment(job, [assessment("networking", "high", ["Old step"])])
+      {:ok, _} = Board.add_task(job, "My own step")
 
-      Board.seed_standard_tasks(job)
+      {:ok, _} = Board.record_assessment(job, [assessment("networking", "high", ["New step"])])
 
-      assert length(Board.get_job!(job.id).tasks) == before
+      titles = Board.get_job!(job.id).tasks |> Enum.map(& &1.title)
+      assert "New step" in titles
+      refute "Old step" in titles
+      assert "My own step" in titles
     end
 
-    test "backfill seeds only jobs that have no standard tasks", %{wishlist: wishlist} do
+    test "ignores plays outside the catalog", %{wishlist: wishlist} do
       job = job_fixture(wishlist)
-      Repo.delete_all(Jobban.Board.Task)
+      {:ok, _} = Board.record_assessment(job, [assessment("bribery", "high", ["nope"])])
 
-      # The backfill is gated off in test config (it runs from the app's boot
-      # task); flip it on just for this assertion. Nothing else reads the flag.
-      Application.put_env(:jobban, :standard_task_backfill_enabled, true)
-      Board.backfill_standard_tasks()
-      Application.put_env(:jobban, :standard_task_backfill_enabled, false)
+      assert Board.get_job!(job.id).job_plays == []
+    end
 
-      assert job_slugs(job.id) == Enum.map(Board.standard_tasks(), &elem(&1, 0))
+    test "assessing a deleted job is a clean no-op", %{wishlist: wishlist} do
+      job = job_fixture(wishlist)
+      {:ok, _} = Board.delete_job(Board.get_job!(job.id))
+
+      assert {:error, :job_deleted} = Board.record_assessment(job, [assessment("apply", "low")])
+    end
+
+    test "broadcasts the change", %{wishlist: wishlist} do
+      job = job_fixture(wishlist)
+      Board.subscribe()
+      {:ok, _} = Board.record_assessment(job, [assessment("apply", "low", ["go"])])
+      assert_receive {:board_changed}
+    end
+  end
+
+  describe "jobs_missing_assessment/0" do
+    test "returns only jobs with no play assessment", %{wishlist: wishlist} do
+      assessed = job_fixture(wishlist, %{"company" => "A"})
+      unassessed = job_fixture(wishlist, %{"company" => "B"})
+      {:ok, _} = Board.record_assessment(assessed, [assessment("apply", "low")])
+
+      ids = Enum.map(Board.jobs_missing_assessment(), & &1.id)
+      assert unassessed.id in ids
+      refute assessed.id in ids
+    end
+  end
+
+  describe "move into Applied auto-completes the cold-apply play" do
+    test "checks off the apply play's steps on the move", %{wishlist: wishlist, applied: applied} do
+      job = job_fixture(wishlist)
+      {:ok, _} = Board.record_assessment(job, [assessment("apply", "high", ["Submit it"])])
+
+      {:ok, _} = Board.move_job(Board.get_job!(job.id), applied.id, 0)
+
+      apply_tasks = Board.get_job!(job.id).tasks |> Enum.filter(&(&1.play_slug == "apply"))
+      assert apply_tasks != []
+      assert Enum.all?(apply_tasks, & &1.done)
     end
   end
 
   describe "tasks" do
-    test "add_task appends a freeform task below the checklist", %{wishlist: wishlist} do
+    test "add_task appends a freeform (play-less) step", %{wishlist: wishlist} do
       job = job_fixture(wishlist)
       {:ok, task} = Board.add_task(job, "  Call the recruiter  ")
 
       assert task.title == "Call the recruiter"
-      assert task.slug == nil
-      assert task.position == length(Board.standard_tasks())
+      assert task.play_slug == nil
     end
 
-    test "toggle_task flips done and stamps done_at", %{wishlist: wishlist} do
+    test "toggle and delete", %{wishlist: wishlist} do
       job = job_fixture(wishlist)
-      task = hd(Board.get_job!(job.id).tasks)
+      {:ok, task} = Board.add_task(job, "scratch")
 
       {:ok, done} = Board.toggle_task(task)
       assert done.done and done.done_at
 
-      {:ok, undone} = Board.toggle_task(done)
-      assert not undone.done and is_nil(undone.done_at)
-    end
-
-    test "delete_task removes it", %{wishlist: wishlist} do
-      job = job_fixture(wishlist)
-      {:ok, task} = Board.add_task(job, "scratch")
-
-      {:ok, _} = Board.delete_task(task)
-      refute Enum.any?(Board.get_job!(job.id).tasks, &(&1.id == task.id))
-    end
-  end
-
-  describe "move into Applied auto-completes the apply step" do
-    test "checks off the apply task on the move", %{wishlist: wishlist, applied: applied} do
-      job = job_fixture(wishlist)
-      {:ok, _} = Board.move_job(job, applied.id, 0)
-
-      apply_task = Enum.find(Board.get_job!(job.id).tasks, &(&1.slug == "apply"))
-      assert apply_task.done
-    end
-
-    test "moving to a non-applied stage leaves it open", %{wishlist: wishlist, rejected: rejected} do
-      job = job_fixture(wishlist)
-      {:ok, _} = Board.move_job(job, rejected.id, 0)
-
-      apply_task = Enum.find(Board.get_job!(job.id).tasks, &(&1.slug == "apply"))
-      refute apply_task.done
+      {:ok, _} = Board.delete_task(done)
+      assert Board.get_job!(job.id).tasks == []
     end
   end
 
   describe "contacts" do
-    test "add, toggle reached, and delete", %{wishlist: wishlist} do
+    test "add, toggle reached, delete", %{wishlist: wishlist} do
       job = job_fixture(wishlist)
       {:ok, contact} = Board.add_contact(job, %{"name" => "Dana", "role" => "Recruiter"})
-
-      assert contact.name == "Dana"
       assert is_nil(contact.reached_out_at)
 
       {:ok, reached} = Board.toggle_contact_reached(contact)
       assert reached.reached_out_at == Date.utc_today()
 
-      {:ok, cleared} = Board.toggle_contact_reached(reached)
-      assert is_nil(cleared.reached_out_at)
-
-      {:ok, _} = Board.delete_contact(cleared)
+      {:ok, _} = Board.delete_contact(reached)
       assert Board.get_job!(job.id).contacts == []
     end
 
@@ -115,50 +148,42 @@ defmodule Jobban.LaunchpadTest do
   end
 
   describe "list_launchpad/0" do
-    test "includes all wishlist jobs, ordered by fit then excitement", %{wishlist: wishlist} do
+    test "includes wishlist jobs ordered by fit then excitement, with plays preloaded", %{
+      wishlist: wishlist
+    } do
       low = job_fixture(wishlist, %{"company" => "Low", "excitement" => 2})
       high = job_fixture(wishlist, %{"company" => "High", "excitement" => 5})
-
       {:ok, _} = Board.record_fit(low, 2, "meh")
       {:ok, _} = Board.record_fit(high, 5, "great")
+      {:ok, _} = Board.record_assessment(high, [assessment("networking", "high", ["intro"])])
 
-      assert [%{id: first}, %{id: second}] = Board.list_launchpad()
-      assert first == high.id
-      assert second == low.id
+      assert [first, second] = Board.list_launchpad()
+      assert first.id == high.id
+      assert second.id == low.id
+      assert [%JobPlay{slug: "networking"}] = first.job_plays
     end
 
-    test "includes applied jobs only while prep is unfinished", %{
+    test "drops applied jobs once their checklist is finished", %{
       wishlist: wishlist,
       applied: applied
     } do
       job = job_fixture(wishlist)
-      {:ok, _} = Board.move_job(job, applied.id, 0)
+      {:ok, _} = Board.record_assessment(job, [assessment("networking", "high", ["do it"])])
+      {:ok, _} = Board.move_job(Board.get_job!(job.id), applied.id, 0)
 
-      # apply step auto-completed, others still open → still on the worklist
       assert Enum.any?(Board.list_launchpad(), &(&1.id == job.id))
 
-      # finish everything → drops off
       Board.get_job!(job.id).tasks
       |> Enum.reject(& &1.done)
       |> Enum.each(&Board.toggle_task/1)
 
       refute Enum.any?(Board.list_launchpad(), &(&1.id == job.id))
     end
-
-    test "preloads tasks and contacts", %{wishlist: wishlist} do
-      job = job_fixture(wishlist)
-      contact_fixture(job)
-
-      [loaded] = Board.list_launchpad()
-      assert length(loaded.tasks) == length(Board.standard_tasks())
-      assert [%{name: "Dana Recruiter"}] = loaded.contacts
-    end
   end
 
-  defp job_slugs(job_id) do
-    Board.get_job!(job_id).tasks
-    |> Enum.filter(& &1.slug)
-    |> Enum.sort_by(& &1.position)
-    |> Enum.map(& &1.slug)
+  test "creating a job leaves it unassessed (strategist disabled in test)", %{wishlist: wishlist} do
+    job = job_fixture(wishlist)
+    assert Repo.all(from p in JobPlay, where: p.job_id == ^job.id) == []
+    assert Repo.all(from t in Task, where: t.job_id == ^job.id) == []
   end
 end

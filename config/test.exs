@@ -41,8 +41,7 @@ config :jobban, importer_req_options: [plug: {Req.Test, Jobban.Importer}]
 # call score/1 directly through the OpenRouter stub with an inline profile
 config :jobban,
   fit_scoring_enabled: false,
-  way_in_suggester_enabled: false,
-  standard_task_backfill_enabled: false,
+  strategist_enabled: false,
   fit_profile: "Test candidate: staff platform engineer, remote only.",
   openrouter_req_options: [plug: {Req.Test, Jobban.LLM.OpenRouter}]
 

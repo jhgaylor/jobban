@@ -9,23 +9,9 @@ defmodule Jobban.Board do
   import Ecto.Query, warn: false
 
   alias Jobban.Repo
-  alias Jobban.Board.{Activity, Contact, Job, Stage, Task}
+  alias Jobban.Board.{Activity, Contact, Job, JobPlay, Plays, Stage, Task}
 
   @topic "board"
-
-  # The standard wishlist→applied readiness checklist, seeded per job. Slugs
-  # are stable identifiers (used for idempotent seeding and the move-to-applied
-  # auto-complete); order here is the order they're shown and worked.
-  @standard_tasks [
-    {"way_in", "Write the way-in — route, story, referral plan"},
-    {"research", "Research the company & role"},
-    {"referral", "Find or ask for a referral"},
-    {"resume", "Tailor your resume & materials"},
-    {"apply", "Submit the application"}
-  ]
-
-  @doc "The standard readiness checklist as `{slug, title}` pairs."
-  def standard_tasks, do: @standard_tasks
 
   def subscribe do
     Phoenix.PubSub.subscribe(Jobban.PubSub, @topic)
@@ -78,7 +64,8 @@ defmodule Jobban.Board do
       stage: [],
       activities: activities_query,
       tasks: tasks_query,
-      contacts: contacts_query
+      contacts: contacts_query,
+      job_plays: []
     )
   end
 
@@ -102,7 +89,6 @@ defmodule Jobban.Board do
         with {:ok, job} <- Repo.insert(changeset) do
           reindex_stage(job.stage_id, [job.id | stage_job_ids(job.stage_id) -- [job.id]])
           log(job, "created", "Added #{job.title} at #{job.company}")
-          seed_standard_tasks(job)
           job
         else
           {:error, changeset} -> Repo.rollback(changeset)
@@ -112,6 +98,7 @@ defmodule Jobban.Board do
     with {:ok, job} <- result do
       broadcast_change()
       Jobban.FitScorer.score_async(job)
+      Jobban.Strategist.assess_async(job)
       {:ok, job}
     end
   end
@@ -183,9 +170,9 @@ defmodule Jobban.Board do
           to_stage = Repo.get!(Stage, to_stage_id)
           log(job, "moved", "Moved from #{from_stage.name} to #{to_stage.name}")
 
-          # Dragging a card into Applied checks off the "submit application"
-          # step automatically — the board move is the source of truth.
-          if to_stage.slug == "applied", do: complete_standard_task(job.id, "apply")
+          # Dragging a card into Applied checks off the cold-apply play's
+          # steps automatically — the board move is the source of truth.
+          if to_stage.slug == "applied", do: complete_play_tasks(job.id, "apply")
         end
 
         Repo.get!(Job, job.id)
@@ -209,10 +196,10 @@ defmodule Jobban.Board do
   ## Launchpad — the wishlist→applied prep view
 
   @doc """
-  Jobs that still need prep work, prioritized. Includes every wishlist job plus
-  any applied job whose readiness checklist isn't finished yet (the
+  Jobs that still need prep work, prioritized — the matrix rows. Includes every
+  wishlist job plus any applied job whose checklist isn't finished yet (the
   still-needs-follow-up tail). Ordered by fit, then excitement, then most-aged
-  first. Tasks and contacts are preloaded.
+  first. Tasks, contacts, and play assessments are preloaded.
   """
   def list_launchpad do
     tasks_query = from t in Task, order_by: [asc: t.position, asc: t.id]
@@ -221,7 +208,7 @@ defmodule Jobban.Board do
     from(j in Job,
       join: s in assoc(j, :stage),
       where: s.slug in ["wishlist", "applied"],
-      preload: [stage: s, tasks: ^tasks_query, contacts: ^contacts_query]
+      preload: [stage: s, tasks: ^tasks_query, contacts: ^contacts_query, job_plays: []]
     )
     |> Repo.all()
     |> Enum.filter(fn job ->
@@ -316,57 +303,88 @@ defmodule Jobban.Board do
     end
   end
 
-  @doc """
-  Inserts any missing standard checklist items for a job. Idempotent — skips
-  slugs already present — so it's safe to call on create and on backfill.
-  Does not broadcast on its own; callers that mutate around it do.
-  """
-  def seed_standard_tasks(%Job{id: job_id} = job) do
-    existing =
-      Repo.all(from t in Task, where: t.job_id == ^job_id and not is_nil(t.slug), select: t.slug)
+  ## Plays — the strategist's per-listing assessment
 
-    base = next_task_position(job_id)
-
-    @standard_tasks
-    |> Enum.reject(fn {slug, _title} -> slug in existing end)
-    |> Enum.with_index(base)
-    |> Enum.each(fn {{slug, title}, position} ->
-      %Task{}
-      |> Task.changeset(%{
-        "job_id" => job_id,
-        "slug" => slug,
-        "title" => title,
-        "position" => position
-      })
-      |> Repo.insert!()
-    end)
-
-    job
+  @doc "Jobs the strategist hasn't assessed yet — the boot backfill's worklist."
+  def jobs_missing_assessment do
+    assessed = Repo.all(from p in JobPlay, select: p.job_id, distinct: true)
+    Repo.all(from j in Job, where: j.id not in ^assessed, order_by: [asc: j.id])
   end
 
   @doc """
-  Boot-time backfill: seeds the standard checklist onto jobs that predate it.
-  Gated off in test so the sandbox isn't touched from the app's boot task.
-  """
-  def backfill_standard_tasks do
-    if Application.get_env(:jobban, :standard_task_backfill_enabled, true) do
-      seeded =
-        Repo.all(from t in Task, where: not is_nil(t.slug), select: t.job_id, distinct: true)
+  Records a strategist assessment: upserts each play's leverage + rationale, and
+  regenerates the auto-populated checklist from the recommended plays' steps.
 
-      from(j in Job, where: j.id not in ^seeded)
-      |> Repo.all()
-      |> Enum.each(&seed_standard_tasks/1)
+  `assessments` is a list of `%{slug, leverage, rationale, steps}` maps. Only
+  non-skip plays get steps. Freeform tasks (nil play_slug) are left untouched;
+  every machine-generated task is wiped and rebuilt so re-assessing is clean.
+  Re-fetches by id so assessing a job deleted mid-flight is a no-op.
+  """
+  def record_assessment(%Job{id: id}, assessments) when is_list(assessments) do
+    case Repo.get(Job, id) do
+      nil ->
+        {:error, :job_deleted}
+
+      _job ->
+        now = DateTime.utc_now(:second)
+
+        {:ok, _} =
+          Repo.transaction(fn ->
+            Repo.delete_all(from t in Task, where: t.job_id == ^id and not is_nil(t.play_slug))
+
+            assessments
+            |> Enum.filter(&(&1.slug in Plays.slugs()))
+            |> Enum.each(&record_one_play(id, &1, now))
+          end)
+
+        broadcast_change()
+        {:ok, get_job(id)}
     end
-
-    :ok
   end
+
+  defp record_one_play(job_id, %{slug: slug} = assessment, now) do
+    %JobPlay{}
+    |> JobPlay.changeset(%{
+      "job_id" => job_id,
+      "slug" => slug,
+      "leverage" => assessment.leverage,
+      "rationale" => assessment.rationale,
+      "assessed_at" => now
+    })
+    |> Repo.insert!(
+      on_conflict: {:replace, [:leverage, :rationale, :assessed_at, :updated_at]},
+      conflict_target: [:job_id, :slug]
+    )
+
+    if Plays.recommended?(assessment.leverage) do
+      base = next_task_position(job_id)
+
+      assessment
+      |> Map.get(:steps, [])
+      |> Enum.with_index(base)
+      |> Enum.each(fn {title, position} ->
+        %Task{}
+        |> Task.changeset(%{
+          "job_id" => job_id,
+          "play_slug" => slug,
+          "title" => title,
+          "position" => position
+        })
+        |> Repo.insert!()
+      end)
+    end
+  end
+
+  ## Tasks (internals)
 
   defp next_task_position(job_id) do
     (Repo.one(from t in Task, where: t.job_id == ^job_id, select: max(t.position)) || -1) + 1
   end
 
-  defp complete_standard_task(job_id, slug) do
-    from(t in Task, where: t.job_id == ^job_id and t.slug == ^slug and t.done == false)
+  defp complete_play_tasks(job_id, play_slug) do
+    from(t in Task,
+      where: t.job_id == ^job_id and t.play_slug == ^play_slug and t.done == false
+    )
     |> Repo.update_all(set: [done: true, done_at: DateTime.utc_now(:second)])
   end
 
