@@ -68,6 +68,28 @@ defmodule JobbanWeb.LaunchpadLiveTest do
       assert Enum.any?(Board.get_job!(job.id).tasks, &(&1.title == "Cold email the CTO"))
     end
 
+    test "shows generated networking targets with how-to-find", %{conn: conn, wishlist: wishlist} do
+      job = job_fixture(wishlist)
+
+      {:ok, _} =
+        Board.record_networking_targets(job, [
+          %{
+            label: "Hiring manager",
+            title_hint: "EM, Platform",
+            why: "owns the req",
+            how_to_find: "Filter the company People tab by 'engineering manager'"
+          }
+        ])
+
+      {:ok, view, _html} = live(conn, ~p"/launchpad")
+      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+
+      assert html =~ "Who to reach"
+      assert html =~ "Hiring manager"
+      assert html =~ "EM, Platform"
+      assert html =~ "Filter the company People tab"
+    end
+
     test "adding a contact persists and shows up", %{conn: conn, wishlist: wishlist} do
       job = job_fixture(wishlist)
       {:ok, view, _html} = live(conn, ~p"/launchpad")

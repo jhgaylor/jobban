@@ -73,6 +73,27 @@ export const SubmitOnMetaEnter = {
   },
 }
 
+// Copies the text in `data-copy` to the clipboard and flashes a "Copied"
+// state on the button for a beat.
+export const Copy = {
+  mounted() {
+    this.el.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(this.el.dataset.copy || "")
+        const label = this.el.querySelector("[data-copy-label]")
+        const target = label || this.el
+        const original = target.textContent
+        target.textContent = "Copied!"
+        setTimeout(() => {
+          target.textContent = original
+        }, 1500)
+      } catch {
+        /* clipboard unavailable (insecure context) — no-op */
+      }
+    })
+  },
+}
+
 // Clears info flashes after a beat (clicking a flash dismisses it).
 export const AutoDismiss = {
   mounted() {

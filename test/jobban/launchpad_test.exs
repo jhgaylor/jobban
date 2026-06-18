@@ -181,6 +181,38 @@ defmodule Jobban.LaunchpadTest do
     end
   end
 
+  describe "record_networking_targets/2" do
+    test "replaces a job's targets and broadcasts", %{wishlist: wishlist} do
+      job = job_fixture(wishlist)
+      Board.subscribe()
+
+      {:ok, _} =
+        Board.record_networking_targets(job, [
+          %{
+            label: "Hiring manager",
+            title_hint: "EM, Platform",
+            why: "owns it",
+            how_to_find: "LinkedIn"
+          },
+          %{label: "Recruiter"}
+        ])
+
+      assert_receive {:board_changed}
+      targets = Board.get_job!(job.id).networking_targets
+      assert Enum.map(targets, & &1.label) == ["Hiring manager", "Recruiter"]
+      assert hd(targets).title_hint == "EM, Platform"
+
+      {:ok, _} = Board.record_networking_targets(job, [%{label: "Just one"}])
+      assert [%{label: "Just one"}] = Board.get_job!(job.id).networking_targets
+    end
+
+    test "is a no-op for a deleted job", %{wishlist: wishlist} do
+      job = job_fixture(wishlist)
+      {:ok, _} = Board.delete_job(Board.get_job!(job.id))
+      assert {:error, :job_deleted} = Board.record_networking_targets(job, [%{label: "x"}])
+    end
+  end
+
   test "creating a job leaves it unassessed (strategist disabled in test)", %{wishlist: wishlist} do
     job = job_fixture(wishlist)
     assert Repo.all(from p in JobPlay, where: p.job_id == ^job.id) == []

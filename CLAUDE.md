@@ -85,10 +85,21 @@ project-specific context.
   auto-checks the cold-apply play's steps inside `move_job/3` (the board move
   is source of truth). LLM is always an enhancement — an unassessed job just
   shows a blank matrix row until assessed.
+- **Networking help** (`Jobban.Networking`, the detail's "Who to reach"
+  section): since the networking play is near-universally high-leverage, this
+  demystifies the *who/how*. `guide/1` (on-demand) generates per-listing
+  `NetworkingTarget` rows — hiring manager / recruiter / team IC / warm
+  connection, each with a `title_hint` and a concrete `how_to_find` recipe
+  (LinkedIn search to run, how to infer the hiring manager, etc.), persisted
+  via `Board.record_networking_targets/2` (replace-on-regen). `draft/2`
+  (on-demand, not persisted) drafts outreach for a target or saved contact —
+  both a LinkedIn DM and an email — shown in an overlay with copy buttons.
+  Same gating as the others (`networking_enabled` + key, off in test).
 - **JS hooks** (`assets/js/hooks.js`): `BoardColumn` (SortableJS,
   forceFallback for styled drags), `Celebrate` (canvas-confetti),
   `AutoFocus`, `AutoDismiss` (info flashes, 2.5s), `SubmitOnMetaEnter`
-  (⌘↵ submits the note textarea). SortableJS + confetti are vendored in
+  (⌘↵ submits the note textarea), `Copy` (copy `data-copy` to clipboard,
+  used by the outreach-draft overlay). SortableJS + confetti are vendored in
   `assets/vendor/` — no npm.
 
 ## Conventions

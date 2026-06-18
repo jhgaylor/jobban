@@ -14,6 +14,7 @@ defmodule JobbanWeb.LaunchpadLive do
 
   alias Jobban.Board
   alias Jobban.Board.Plays
+  alias Jobban.Networking
   alias Jobban.Strategist
 
   @avatar_gradients [
@@ -39,7 +40,10 @@ defmodule JobbanWeb.LaunchpadLive do
          admin?: true,
          selected_id: nil,
          contact_form: nil,
-         assessing?: false
+         assessing?: false,
+         generating_guide?: false,
+         drafting_for: nil,
+         draft: nil
        )
        |> assign_jobs()}
     else
@@ -56,7 +60,7 @@ defmodule JobbanWeb.LaunchpadLive do
 
     socket =
       if socket.assigns.selected_id && selected(socket.assigns) == nil do
-        assign(socket, selected_id: nil, contact_form: nil)
+        assign(socket, selected_id: nil, contact_form: nil, draft: nil, drafting_for: nil)
       else
         socket
       end
@@ -67,7 +71,8 @@ defmodule JobbanWeb.LaunchpadLive do
   # Defense in depth — mount already redirects non-admins, but never trust the
   # client. Every mutating event funnels through this guard first.
   @write_events ~w(select_job close_detail reassess add_task toggle_task delete_task
-                   add_contact validate_contact delete_contact toggle_reached)
+                   add_contact validate_contact delete_contact toggle_reached
+                   generate_guide draft_outreach close_draft)
 
   @impl true
   def handle_event(event, _params, %{assigns: %{admin?: false}} = socket)
@@ -77,13 +82,65 @@ defmodule JobbanWeb.LaunchpadLive do
 
   def handle_event("select_job", %{"id" => id}, socket) do
     case Board.get_job(to_int(id)) do
-      nil -> {:noreply, socket}
-      job -> {:noreply, assign(socket, selected_id: job.id, contact_form: blank_contact_form())}
+      nil ->
+        {:noreply, socket}
+
+      job ->
+        {:noreply,
+         assign(socket,
+           selected_id: job.id,
+           contact_form: blank_contact_form(),
+           draft: nil,
+           drafting_for: nil
+         )}
     end
   end
 
   def handle_event("close_detail", _params, socket) do
-    {:noreply, assign(socket, selected_id: nil, contact_form: nil)}
+    {:noreply, assign(socket, selected_id: nil, contact_form: nil, draft: nil, drafting_for: nil)}
+  end
+
+  def handle_event("generate_guide", _params, socket) do
+    job = current_job(socket)
+
+    cond do
+      job == nil ->
+        {:noreply, socket}
+
+      Networking.enabled?() ->
+        {:noreply,
+         socket
+         |> assign(generating_guide?: true)
+         |> start_async(:guide, fn -> Networking.guide(job) end)}
+
+      true ->
+        {:noreply, put_flash(socket, :error, "Networking help needs an OpenRouter key")}
+    end
+  end
+
+  def handle_event("draft_outreach", params, socket) do
+    job = current_job(socket)
+    target = resolve_target(job, params)
+
+    cond do
+      job == nil or target == nil ->
+        {:noreply, socket}
+
+      Networking.enabled?() ->
+        who = target[:name] || target[:label]
+
+        {:noreply,
+         socket
+         |> assign(draft: nil, drafting_for: who)
+         |> start_async(:draft, fn -> {who, Networking.draft(job, target)} end)}
+
+      true ->
+        {:noreply, put_flash(socket, :error, "Drafting needs an OpenRouter key")}
+    end
+  end
+
+  def handle_event("close_draft", _params, socket) do
+    {:noreply, assign(socket, draft: nil, drafting_for: nil)}
   end
 
   def handle_event("reassess", _params, socket) do
@@ -164,7 +221,58 @@ defmodule JobbanWeb.LaunchpadLive do
      socket |> assign(assessing?: false) |> put_flash(:error, "Assessment crashed — try again")}
   end
 
+  def handle_async(:guide, {:ok, {:ok, _job}}, socket) do
+    {:noreply,
+     socket |> assign(generating_guide?: false) |> put_flash(:info, "Mapped out who to reach")}
+  end
+
+  def handle_async(:guide, {:ok, {:error, _reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(generating_guide?: false)
+     |> put_flash(:error, "Couldn't map out contacts — try again")}
+  end
+
+  def handle_async(:guide, {:exit, _reason}, socket) do
+    {:noreply,
+     socket |> assign(generating_guide?: false) |> put_flash(:error, "That crashed — try again")}
+  end
+
+  def handle_async(:draft, {:ok, {who, {:ok, message}}}, socket) do
+    {:noreply, assign(socket, drafting_for: nil, draft: Map.put(message, :who, who))}
+  end
+
+  def handle_async(:draft, {:ok, {_who, {:error, _reason}}}, socket) do
+    {:noreply,
+     socket |> assign(drafting_for: nil) |> put_flash(:error, "Couldn't draft that — try again")}
+  end
+
+  def handle_async(:draft, {:exit, _reason}, socket) do
+    {:noreply,
+     socket |> assign(drafting_for: nil) |> put_flash(:error, "Draft crashed — try again")}
+  end
+
   ## Internals
+
+  # Resolve a draft target from either a generated networking target or a saved
+  # contact, into the `%{label, title_hint, name}` map the drafter expects.
+  defp resolve_target(nil, _params), do: nil
+
+  defp resolve_target(job, %{"target-id" => id}) do
+    case Enum.find(job.networking_targets, &(&1.id == to_int(id))) do
+      nil -> nil
+      t -> %{label: t.label, title_hint: t.title_hint}
+    end
+  end
+
+  defp resolve_target(job, %{"contact-id" => id}) do
+    case Enum.find(job.contacts, &(&1.id == to_int(id))) do
+      nil -> nil
+      c -> %{name: c.name, label: c.role || "Contact", title_hint: c.role}
+    end
+  end
+
+  defp resolve_target(_job, _params), do: nil
 
   defp assign_jobs(socket), do: assign(socket, jobs: Board.list_launchpad())
 
@@ -309,6 +417,9 @@ defmodule JobbanWeb.LaunchpadLive do
         plays={@plays}
         contact_form={@contact_form}
         assessing?={@assessing?}
+        generating_guide?={@generating_guide?}
+        drafting_for={@drafting_for}
+        draft={@draft}
       />
       <Layouts.flash_group flash={@flash} />
     </div>
@@ -350,6 +461,9 @@ defmodule JobbanWeb.LaunchpadLive do
   attr :plays, :list, required: true
   attr :contact_form, :any, required: true
   attr :assessing?, :boolean, required: true
+  attr :generating_guide?, :boolean, required: true
+  attr :drafting_for, :string, default: nil
+  attr :draft, :map, default: nil
 
   defp detail(assigns) do
     ~H"""
@@ -357,12 +471,12 @@ defmodule JobbanWeb.LaunchpadLive do
       class="fixed inset-0 z-50 grid place-items-center p-4 sm:p-6 bg-black/40 backdrop-blur-sm animate-fade-in"
       role="dialog"
       aria-modal="true"
-      phx-window-keydown="close_detail"
+      phx-window-keydown={!@draft && "close_detail"}
       phx-key="escape"
     >
       <div
         class="w-full max-w-2xl max-h-full overflow-y-auto rounded-2xl bg-base-100 shadow-2xl border border-base-content/10 animate-pop-in"
-        phx-click-away="close_detail"
+        phx-click-away={!@draft && "close_detail"}
       >
         <div class="flex items-start gap-3.5 p-5 pb-4 border-b border-base-content/8">
           <.company_avatar company={@job.company} class="size-12 text-base" />
@@ -418,6 +532,72 @@ defmodule JobbanWeb.LaunchpadLive do
             do: "hit Re-assess to have the strategist rate the plays.",
             else: "set an OpenRouter key to enable the strategist."}
         </p>
+
+        <%!-- Networking: who to reach + how to find them --%>
+        <div class="mx-5 mt-4 rounded-xl bg-indigo-500/8 border border-indigo-500/15 p-4">
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5 mb-2">
+            <.icon name="hero-user-group-micro" class="size-3.5" /> Who to reach — & how to find them
+            <button
+              :if={Networking.enabled?()}
+              type="button"
+              class="btn btn-ghost btn-xs ml-auto gap-1 opacity-70 hover:opacity-100 normal-case tracking-normal"
+              phx-click="generate_guide"
+              disabled={@generating_guide?}
+            >
+              <.icon
+                name={if @generating_guide?, do: "hero-arrow-path-micro", else: "hero-sparkles-micro"}
+                class={["size-3", @generating_guide? && "animate-spin"]}
+              />
+              {cond do
+                @generating_guide? -> "Mapping…"
+                @job.networking_targets == [] -> "Find people"
+                true -> "Refresh"
+              end}
+            </button>
+          </h4>
+
+          <p
+            :if={@job.networking_targets == [] && !@generating_guide?}
+            class="text-sm opacity-60 italic leading-snug"
+          >
+            Not mapped yet — find out who to contact at {@job.company} and exactly how to find them.
+          </p>
+
+          <ul class="space-y-2.5">
+            <li :for={t <- @job.networking_targets} class="rounded-lg bg-base-100/60 p-3">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-semibold text-sm">{t.label}</span>
+                <span :if={t.title_hint} class="badge badge-ghost badge-xs">{t.title_hint}</span>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-xs ml-auto gap-1 opacity-70 hover:opacity-100"
+                  phx-click="draft_outreach"
+                  phx-value-target-id={t.id}
+                  disabled={@drafting_for != nil}
+                >
+                  <.icon
+                    name={
+                      if @drafting_for == t.label,
+                        do: "hero-arrow-path-micro",
+                        else: "hero-pencil-square-micro"
+                    }
+                    class={["size-3", @drafting_for == t.label && "animate-spin"]}
+                  /> Draft
+                </button>
+              </div>
+              <p :if={t.why} class="text-xs opacity-70 mt-1 leading-snug">{t.why}</p>
+              <div
+                :if={t.how_to_find}
+                class="mt-2 rounded-md bg-base-200/60 p-2.5 text-xs leading-relaxed"
+              >
+                <p class="font-semibold uppercase tracking-wider text-[10px] opacity-50 mb-1">
+                  How to find
+                </p>
+                <p class="opacity-80 whitespace-pre-line">{t.how_to_find}</p>
+              </div>
+            </li>
+          </ul>
+        </div>
 
         <%!-- One card per play, in catalog order --%>
         <.play_card :for={play <- @plays} job={@job} play={play} />
@@ -503,6 +683,23 @@ defmodule JobbanWeb.LaunchpadLive do
               </div>
               <button
                 type="button"
+                phx-click="draft_outreach"
+                phx-value-contact-id={contact.id}
+                disabled={@drafting_for != nil}
+                class="btn btn-ghost btn-xs gap-1 opacity-70 hover:opacity-100 shrink-0"
+                title="Draft outreach to this contact"
+              >
+                <.icon
+                  name={
+                    if @drafting_for == contact.name,
+                      do: "hero-arrow-path-micro",
+                      else: "hero-pencil-square-micro"
+                  }
+                  class={["size-3", @drafting_for == contact.name && "animate-spin"]}
+                /> Draft
+              </button>
+              <button
+                type="button"
                 phx-click="delete_contact"
                 phx-value-id={contact.id}
                 data-confirm={"Remove #{contact.name}?"}
@@ -572,7 +769,87 @@ defmodule JobbanWeb.LaunchpadLive do
         </div>
       </div>
     </div>
+
+    <%!-- Outreach draft overlay (sits above the detail modal) --%>
+    <div
+      :if={@draft}
+      class="fixed inset-0 z-[60] grid place-items-center p-4 sm:p-6 bg-black/50 backdrop-blur-sm animate-fade-in"
+      phx-window-keydown="close_draft"
+      phx-key="escape"
+    >
+      <div
+        class="w-full max-w-xl max-h-full overflow-y-auto rounded-2xl bg-base-100 shadow-2xl border border-base-content/10 animate-pop-in"
+        phx-click-away="close_draft"
+      >
+        <div class="flex items-center gap-2 p-5 pb-3 border-b border-base-content/8">
+          <.icon name="hero-pencil-square-micro" class="size-4 text-indigo-400" />
+          <h3 class="font-bold truncate">Outreach to {@draft.who}</h3>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm btn-circle ml-auto"
+            phx-click="close_draft"
+            aria-label="Close"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
+          </button>
+        </div>
+
+        <div class="p-5 space-y-4">
+          <div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <h4 class="text-xs font-semibold uppercase tracking-wider opacity-50 flex items-center gap-1">
+                <.icon name="hero-chat-bubble-left-right-micro" class="size-3.5" /> LinkedIn
+              </h4>
+              <button
+                id="copy-linkedin"
+                phx-hook="Copy"
+                data-copy={@draft.linkedin}
+                class="btn btn-xs btn-soft gap-1 ml-auto"
+              >
+                <.icon name="hero-clipboard-document-micro" class="size-3" />
+                <span data-copy-label>Copy</span>
+              </button>
+            </div>
+            <p class="text-sm whitespace-pre-line bg-base-200/50 rounded-lg p-3 leading-relaxed">
+              {@draft.linkedin}
+            </p>
+          </div>
+
+          <div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <h4 class="text-xs font-semibold uppercase tracking-wider opacity-50 flex items-center gap-1">
+                <.icon name="hero-envelope-micro" class="size-3.5" /> Email
+              </h4>
+              <button
+                id="copy-email"
+                phx-hook="Copy"
+                data-copy={email_clipboard(@draft)}
+                class="btn btn-xs btn-soft gap-1 ml-auto"
+              >
+                <.icon name="hero-clipboard-document-micro" class="size-3" />
+                <span data-copy-label>Copy</span>
+              </button>
+            </div>
+            <div class="bg-base-200/50 rounded-lg p-3">
+              <p :if={@draft.email_subject != ""} class="text-sm font-semibold mb-1.5">
+                {@draft.email_subject}
+              </p>
+              <p class="text-sm whitespace-pre-line leading-relaxed opacity-90">
+                {@draft.email_body}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
     """
+  end
+
+  defp email_clipboard(%{email_subject: subject, email_body: body}) do
+    case String.trim(subject || "") do
+      "" -> body
+      s -> "Subject: #{s}\n\n#{body}"
+    end
   end
 
   attr :job, :map, required: true

@@ -9,7 +9,7 @@ defmodule Jobban.Board do
   import Ecto.Query, warn: false
 
   alias Jobban.Repo
-  alias Jobban.Board.{Activity, Contact, Job, JobPlay, Plays, Stage, Task}
+  alias Jobban.Board.{Activity, Contact, Job, JobPlay, NetworkingTarget, Plays, Stage, Task}
 
   @topic "board"
 
@@ -60,12 +60,15 @@ defmodule Jobban.Board do
     tasks_query = from t in Task, order_by: [asc: t.position, asc: t.id]
     contacts_query = from c in Contact, order_by: [asc: c.id]
 
+    targets_query = from t in NetworkingTarget, order_by: [asc: t.position, asc: t.id]
+
     Repo.preload(job,
       stage: [],
       activities: activities_query,
       tasks: tasks_query,
       contacts: contacts_query,
-      job_plays: []
+      job_plays: [],
+      networking_targets: targets_query
     )
   end
 
@@ -204,11 +207,18 @@ defmodule Jobban.Board do
   def list_launchpad do
     tasks_query = from t in Task, order_by: [asc: t.position, asc: t.id]
     contacts_query = from c in Contact, order_by: [asc: c.id]
+    targets_query = from t in NetworkingTarget, order_by: [asc: t.position, asc: t.id]
 
     from(j in Job,
       join: s in assoc(j, :stage),
       where: s.slug in ["wishlist", "applied"],
-      preload: [stage: s, tasks: ^tasks_query, contacts: ^contacts_query, job_plays: []]
+      preload: [
+        stage: s,
+        tasks: ^tasks_query,
+        contacts: ^contacts_query,
+        job_plays: [],
+        networking_targets: ^targets_query
+      ]
     )
     |> Repo.all()
     |> Enum.filter(fn job ->
@@ -386,6 +396,44 @@ defmodule Jobban.Board do
       where: t.job_id == ^job_id and t.play_slug == ^play_slug and t.done == false
     )
     |> Repo.update_all(set: [done: true, done_at: DateTime.utc_now(:second)])
+  end
+
+  ## Networking — who to reach and how to find them
+
+  @doc """
+  Replaces a job's networking targets with a freshly generated set. `targets`
+  is a list of `%{label, title_hint, why, how_to_find}` maps. Re-fetches by id
+  so generating for a deleted job is a clean no-op.
+  """
+  def record_networking_targets(%Job{id: id}, targets) when is_list(targets) do
+    case Repo.get(Job, id) do
+      nil ->
+        {:error, :job_deleted}
+
+      _job ->
+        {:ok, _} =
+          Repo.transaction(fn ->
+            Repo.delete_all(from t in NetworkingTarget, where: t.job_id == ^id)
+
+            targets
+            |> Enum.with_index()
+            |> Enum.each(fn {target, position} ->
+              %NetworkingTarget{}
+              |> NetworkingTarget.changeset(%{
+                "job_id" => id,
+                "label" => target.label,
+                "title_hint" => target[:title_hint],
+                "why" => target[:why],
+                "how_to_find" => target[:how_to_find],
+                "position" => position
+              })
+              |> Repo.insert!()
+            end)
+          end)
+
+        broadcast_change()
+        {:ok, get_job(id)}
+    end
   end
 
   ## Stats
