@@ -173,6 +173,24 @@ defmodule JobbanWeb.BoardLiveTest do
       assert html =~ "Way in"
       assert html =~ "Get a referral from the CTO"
     end
+
+    test "modal shows the briefing when one exists", %{conn: conn, wishlist: wishlist} do
+      job = job_fixture(wishlist)
+
+      {:ok, _} =
+        Board.record_brief(job, %{
+          company_overview: "They run payments infrastructure.",
+          role_in_company: "Sits on the platform team.",
+          strategic_value: "Directly protects revenue."
+        })
+
+      {:ok, view, _html} = live(conn, ~p"/")
+      html = view |> element("#job-#{job.id}") |> render_click()
+
+      assert html =~ "Briefing"
+      assert html =~ "They run payments infrastructure."
+      assert html =~ "Why it matters to them"
+    end
   end
 
   describe "read-only (logged out)" do
@@ -232,6 +250,19 @@ defmodule JobbanWeb.BoardLiveTest do
       refute html =~ "sneak in through a referral"
       refute html =~ "Way in"
       refute html =~ "note-form"
+    end
+
+    test "modal hides the briefing from visitors", %{conn: conn, wishlist: wishlist} do
+      job = job_fixture(wishlist, %{"company" => "Fly.io"})
+
+      {:ok, _} =
+        Board.record_brief(job, %{company_overview: "secret internal company rundown"})
+
+      {:ok, view, _html} = live(conn, ~p"/")
+      html = view |> element("#job-#{job.id}") |> render_click()
+
+      refute html =~ "secret internal company rundown"
+      refute html =~ "Briefing"
     end
   end
 end

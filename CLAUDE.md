@@ -107,11 +107,16 @@ project-specific context.
   (on-demand, not persisted) drafts outreach for a target or saved contact —
   both a LinkedIn DM and an email — shown in an overlay with copy buttons.
   Same gating as the others (`networking_enabled` + key, off in test).
-- **Briefing** (`Jobban.Briefing`, the detail's "Briefing" section): on-demand
-  per-listing explainer — what the company does, where this role likely sits,
-  and its strategic value to the company. `brief/1` generates and upserts a
-  `JobBrief` (has_one per job) via `Board.record_brief/2`. Gated
-  `briefing_enabled` + key (off in test). Prep for interviews/outreach.
+- **Briefing** (`Jobban.Briefing`): on-demand per-listing explainer — what the
+  company does, where this role likely sits, and its strategic value. `brief/1`
+  generates and upserts a `JobBrief` (has_one per job) via `Board.record_brief/2`;
+  `brief_async/1` is the fire-and-forget variant (mirrors `FitScorer.score_async`).
+  Surfaced in **two places**: the launchpad detail's "1 · Size it up" beat, and an
+  **admin-only card in the public board's job modal** (`BoardLive`, alongside the
+  way-in/fit cards, generated via `generate_brief`) — the board is the *only* place
+  to brief an interviewing-stage job, since by then it has left the launchpad.
+  Hidden from logged-out visitors like notes/approach. Gated `briefing_enabled` +
+  key (off in test). Prep for interviews/outreach.
 - **JS hooks** (`assets/js/hooks.js`): `BoardColumn` (SortableJS,
   forceFallback for styled drags), `Celebrate` (canvas-confetti),
   `AutoFocus`, `AutoDismiss` (info flashes, 2.5s), `SubmitOnMetaEnter`

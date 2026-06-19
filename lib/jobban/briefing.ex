@@ -20,6 +20,15 @@ defmodule Jobban.Briefing do
     Application.get_env(:jobban, :briefing_enabled, true) and OpenRouter.configured?()
   end
 
+  @doc "Fire-and-forget briefing of one job. No-op when briefing is disabled."
+  def brief_async(%Job{} = job) do
+    if enabled?() do
+      Task.Supervisor.start_child(Jobban.TaskSupervisor, fn -> brief(job) end)
+    end
+
+    :ok
+  end
+
   @doc "Generates and persists a job's briefing. Returns the updated job."
   def brief(%Job{} = job) do
     with true <- enabled?() or :disabled,

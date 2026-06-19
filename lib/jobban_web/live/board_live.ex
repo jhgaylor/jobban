@@ -75,7 +75,7 @@ defmodule JobbanWeb.BoardLive do
   # Every mutating event funnels through this guard first — hiding the
   # controls client-side is cosmetic, this is the actual enforcement.
   @write_events ~w(move_job open_quick_add cancel_quick_add create_job import_job
-                   validate_job save_job delete_job add_note rescore_fit)
+                   validate_job save_job delete_job add_note rescore_fit generate_brief)
 
   @impl true
   def handle_event(event, _params, %{assigns: %{admin?: false}} = socket)
@@ -180,6 +180,20 @@ defmodule JobbanWeb.BoardLive do
 
       true ->
         {:noreply, put_flash(socket, :error, "Fit scoring needs an OpenRouter key")}
+    end
+  end
+
+  def handle_event("generate_brief", _params, socket) do
+    cond do
+      socket.assigns.selected_job == nil ->
+        {:noreply, socket}
+
+      Jobban.Briefing.enabled?() ->
+        Jobban.Briefing.brief_async(socket.assigns.selected_job)
+        {:noreply, put_flash(socket, :info, "Writing a briefing…")}
+
+      true ->
+        {:noreply, put_flash(socket, :error, "Briefings need an OpenRouter key")}
     end
   end
 
@@ -659,6 +673,47 @@ defmodule JobbanWeb.BoardLive do
           <p :if={!@job.fit_score} class="text-sm opacity-50 italic">Not scored yet.</p>
         </div>
 
+        <%!-- Briefing: company/role context for interviews + outreach. The
+             interviewing stage has left the launchpad, so this is the only place
+             to brief such a job. Admin-only, like the way-in and fit cards. --%>
+        <div
+          :if={@admin? && (@job.job_brief || Jobban.Briefing.enabled?())}
+          class="mx-5 mt-4 rounded-xl bg-cyan-500/8 border border-cyan-500/15 p-4"
+        >
+          <h4 class="text-xs font-semibold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5 mb-2">
+            <.icon name="hero-newspaper-micro" class="size-3.5" /> Briefing
+            <button
+              :if={Jobban.Briefing.enabled?()}
+              type="button"
+              class="btn btn-ghost btn-xs ml-auto gap-1 opacity-60 hover:opacity-100"
+              phx-click="generate_brief"
+            >
+              <.icon name="hero-sparkles-micro" class="size-3" />
+              {if @job.job_brief, do: "Refresh", else: "Generate"}
+            </button>
+          </h4>
+          <div :if={@job.job_brief} class="space-y-3">
+            <.brief_part
+              :if={@job.job_brief.company_overview}
+              label="What they do"
+              text={@job.job_brief.company_overview}
+            />
+            <.brief_part
+              :if={@job.job_brief.role_in_company}
+              label="The role here"
+              text={@job.job_brief.role_in_company}
+            />
+            <.brief_part
+              :if={@job.job_brief.strategic_value}
+              label="Why it matters to them"
+              text={@job.job_brief.strategic_value}
+            />
+          </div>
+          <p :if={is_nil(@job.job_brief)} class="text-sm opacity-50 italic leading-snug">
+            Generate a rundown of what {@job.company} does, where this role sits, and why it matters to them.
+          </p>
+        </div>
+
         <div :if={!@admin?} class="p-5 pt-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
             <.detail :if={@job.location} label="Location" value={@job.location} />
@@ -810,6 +865,18 @@ defmodule JobbanWeb.BoardLive do
 
   defp days_in_stage(%Job{stage_entered_at: entered}) do
     DateTime.diff(DateTime.utc_now(), entered, :day)
+  end
+
+  attr :label, :string, required: true
+  attr :text, :string, required: true
+
+  defp brief_part(assigns) do
+    ~H"""
+    <div>
+      <p class="font-semibold uppercase tracking-wider text-[10px] opacity-50 mb-1">{@label}</p>
+      <p class="text-sm leading-relaxed opacity-85 whitespace-pre-line">{@text}</p>
+    </div>
+    """
   end
 
   defp days_label(0), do: "entered today"
