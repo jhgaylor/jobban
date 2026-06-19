@@ -38,11 +38,39 @@ defmodule JobbanWeb.LaunchpadLiveTest do
       {:ok, _} = Board.record_assessment(job, [assessment("networking", "high", ["Ask Dana"])])
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      html = render_hook(view, "toggle_section", %{"section" => "plays"})
 
       assert html =~ "Networking"
       assert html =~ "Ask Dana"
       assert html =~ "because networking"
+    end
+
+    test "leads with a 'do this next' action", %{conn: conn, wishlist: wishlist} do
+      job = job_fixture(wishlist)
+      {:ok, _} = Board.record_assessment(job, [assessment("build", "high", ["Ship a quick demo"])])
+
+      {:ok, view, _html} = live(conn, ~p"/launchpad")
+      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+
+      # the lead card is always visible (not collapsed) and names the next step + why
+      assert html =~ "Do this next"
+      assert html =~ "Ship a quick demo"
+      assert html =~ "high leverage"
+    end
+
+    test "leads with 'find people' when networking is top and unmapped", %{
+      conn: conn,
+      wishlist: wishlist
+    } do
+      job = job_fixture(wishlist)
+      {:ok, _} = Board.record_assessment(job, [assessment("networking", "high", ["intro"])])
+
+      {:ok, view, _html} = live(conn, ~p"/launchpad")
+      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+
+      assert html =~ "Do this next"
+      assert html =~ "map out who to reach"
     end
 
     test "toggling a generated step persists", %{conn: conn, wishlist: wishlist} do
@@ -83,7 +111,8 @@ defmodule JobbanWeb.LaunchpadLiveTest do
         ])
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      html = render_hook(view, "toggle_section", %{"section" => "people"})
 
       assert html =~ "Who to reach"
       assert html =~ "Hiring manager"
@@ -104,7 +133,8 @@ defmodule JobbanWeb.LaunchpadLiveTest do
         })
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      html = render_hook(view, "toggle_section", %{"section" => "briefing"})
 
       assert html =~ "Briefing"
       assert html =~ "They run payments infrastructure."
@@ -122,7 +152,8 @@ defmodule JobbanWeb.LaunchpadLiveTest do
       })
 
       assert [%{name: "Dana Reed"}] = Board.get_job!(job.id).contacts
-      assert render(view) =~ "Dana Reed"
+      html = render_hook(view, "toggle_section", %{"section" => "contacts"})
+      assert html =~ "Dana Reed"
     end
   end
 end

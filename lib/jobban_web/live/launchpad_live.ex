@@ -45,7 +45,8 @@ defmodule JobbanWeb.LaunchpadLive do
          generating_guide?: false,
          briefing?: false,
          drafting_for: nil,
-         draft: nil
+         draft: nil,
+         open_sections: MapSet.new()
        )
        |> assign_jobs()}
     else
@@ -74,7 +75,7 @@ defmodule JobbanWeb.LaunchpadLive do
   # client. Every mutating event funnels through this guard first.
   @write_events ~w(select_job close_detail reassess add_task toggle_task delete_task
                    add_contact validate_contact delete_contact toggle_reached
-                   generate_guide draft_outreach close_draft generate_brief)
+                   generate_guide draft_outreach close_draft generate_brief toggle_section)
 
   @impl true
   def handle_event(event, _params, %{assigns: %{admin?: false}} = socket)
@@ -93,7 +94,8 @@ defmodule JobbanWeb.LaunchpadLive do
            selected_id: job.id,
            contact_form: blank_contact_form(),
            draft: nil,
-           drafting_for: nil
+           drafting_for: nil,
+           open_sections: MapSet.new()
          )}
     end
   end
@@ -161,6 +163,13 @@ defmodule JobbanWeb.LaunchpadLive do
 
   def handle_event("close_draft", _params, socket) do
     {:noreply, assign(socket, draft: nil, drafting_for: nil)}
+  end
+
+  def handle_event("toggle_section", %{"section" => key}, socket) do
+    {:noreply,
+     update(socket, :open_sections, fn open ->
+       if MapSet.member?(open, key), do: MapSet.delete(open, key), else: MapSet.put(open, key)
+     end)}
   end
 
   def handle_event("reassess", _params, socket) do
@@ -457,6 +466,7 @@ defmodule JobbanWeb.LaunchpadLive do
         briefing?={@briefing?}
         drafting_for={@drafting_for}
         draft={@draft}
+        open_sections={@open_sections}
       />
       <Layouts.flash_group flash={@flash} />
     </div>
@@ -502,6 +512,7 @@ defmodule JobbanWeb.LaunchpadLive do
   attr :briefing?, :boolean, required: true
   attr :drafting_for, :string, default: nil
   attr :draft, :map, default: nil
+  attr :open_sections, :any, required: true
 
   defp detail(assigns) do
     ~H"""
@@ -562,14 +573,21 @@ defmodule JobbanWeb.LaunchpadLive do
           </div>
         </div>
 
-        <%!-- Briefing: what they do, the role, why it matters --%>
-        <div class="mx-5 mt-4 rounded-xl bg-cyan-500/8 border border-cyan-500/15 p-4">
-          <h4 class="text-xs font-semibold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5 mb-2">
-            <.icon name="hero-book-open-micro" class="size-3.5" /> Briefing
+        <.next_move job={@job} assessing?={@assessing?} generating_guide?={@generating_guide?} />
+
+        <%!-- Briefing --%>
+        <.section
+          key="briefing"
+          title="Briefing"
+          accent="text-cyan-400"
+          open={@open_sections}
+          summary={briefing_summary(@job)}
+        >
+          <:actions>
             <button
               :if={Briefing.enabled?()}
               type="button"
-              class="btn btn-ghost btn-xs ml-auto gap-1 opacity-70 hover:opacity-100 normal-case tracking-normal"
+              class="btn btn-ghost btn-xs gap-1 opacity-70 hover:opacity-100"
               phx-click="generate_brief"
               disabled={@briefing?}
             >
@@ -583,13 +601,10 @@ defmodule JobbanWeb.LaunchpadLive do
                 true -> "Generate"
               end}
             </button>
-          </h4>
+          </:actions>
 
-          <p
-            :if={is_nil(@job.job_brief) && !@briefing?}
-            class="text-sm opacity-60 italic leading-snug"
-          >
-            No briefing yet — generate a rundown of what {@job.company} does, where this role sits, and why it matters to them.
+          <p :if={is_nil(@job.job_brief)} class="text-sm opacity-60 italic leading-snug">
+            Generate a rundown of what {@job.company} does, where this role sits, and why it matters to them.
           </p>
 
           <div :if={@job.job_brief} class="space-y-3">
@@ -609,25 +624,73 @@ defmodule JobbanWeb.LaunchpadLive do
               text={@job.job_brief.strategic_value}
             />
           </div>
-        </div>
+        </.section>
 
-        <p
-          :if={@job.job_plays == []}
-          class="mx-5 mt-4 rounded-xl bg-base-200/60 p-4 text-sm opacity-60 italic"
+        <%!-- The plan: plays + steps --%>
+        <.section
+          key="plays"
+          title="The plan"
+          open={@open_sections}
+          summary={plays_summary(@job)}
         >
-          Not assessed yet — {if Strategist.enabled?(),
-            do: "hit Re-assess to have the strategist rate the plays.",
-            else: "set an OpenRouter key to enable the strategist."}
-        </p>
+          <:actions>
+            <button
+              :if={Strategist.enabled?()}
+              type="button"
+              class="btn btn-ghost btn-xs gap-1 opacity-70 hover:opacity-100"
+              phx-click="reassess"
+              disabled={@assessing?}
+            >
+              <.icon
+                name={if @assessing?, do: "hero-arrow-path-micro", else: "hero-sparkles-micro"}
+                class={["size-3", @assessing? && "animate-spin"]}
+              />
+              {if @assessing?, do: "Assessing…", else: "Re-assess"}
+            </button>
+          </:actions>
 
-        <%!-- Networking: who to reach + how to find them --%>
-        <div class="mx-5 mt-4 rounded-xl bg-indigo-500/8 border border-indigo-500/15 p-4">
-          <h4 class="text-xs font-semibold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5 mb-2">
-            <.icon name="hero-user-group-micro" class="size-3.5" /> Who to reach — & how to find them
+          <p :if={@job.job_plays == []} class="text-sm opacity-60 italic leading-snug">
+            Not assessed yet — {if Strategist.enabled?(),
+              do: "hit Re-assess to rate the ways in.",
+              else: "set an OpenRouter key to enable the strategist."}
+          </p>
+
+          <div :if={@job.job_plays != []} class="space-y-2.5">
+            <.play_card :for={play <- @plays} job={@job} play={play} />
+          </div>
+
+          <div class="mt-3">
+            <p class="font-semibold uppercase tracking-wider text-[10px] opacity-50 mb-1.5">
+              Other steps
+            </p>
+            <.task_list tasks={freeform_tasks(@job)} empty="No extra steps." />
+            <form phx-submit="add_task" class="flex gap-2 mt-2">
+              <input
+                name="task[title]"
+                placeholder="Add your own step…"
+                autocomplete="off"
+                class="input input-xs flex-1 bg-base-100"
+              />
+              <button type="submit" class="btn btn-soft btn-xs">
+                <.icon name="hero-plus-micro" class="size-4" />
+              </button>
+            </form>
+          </div>
+        </.section>
+
+        <%!-- Who to reach + how to find them --%>
+        <.section
+          key="people"
+          title="Who to reach"
+          accent="text-indigo-400"
+          open={@open_sections}
+          summary={people_summary(@job)}
+        >
+          <:actions>
             <button
               :if={Networking.enabled?()}
               type="button"
-              class="btn btn-ghost btn-xs ml-auto gap-1 opacity-70 hover:opacity-100 normal-case tracking-normal"
+              class="btn btn-ghost btn-xs gap-1 opacity-70 hover:opacity-100"
               phx-click="generate_guide"
               disabled={@generating_guide?}
             >
@@ -641,13 +704,13 @@ defmodule JobbanWeb.LaunchpadLive do
                 true -> "Refresh"
               end}
             </button>
-          </h4>
+          </:actions>
 
           <p
             :if={@job.networking_targets == [] && !@generating_guide?}
             class="text-sm opacity-60 italic leading-snug"
           >
-            Not mapped yet — find out who to contact at {@job.company} and exactly how to find them.
+            Find out who to contact at {@job.company} and exactly how to find them.
           </p>
 
           <ul class="space-y-2.5">
@@ -693,36 +756,16 @@ defmodule JobbanWeb.LaunchpadLive do
               </div>
             </li>
           </ul>
-        </div>
-
-        <%!-- One card per play, in catalog order --%>
-        <.play_card :for={play <- @plays} job={@job} play={play} />
-
-        <%!-- Freeform steps not tied to a play --%>
-        <div class="mx-5 mt-4 rounded-xl bg-base-200/50 border border-base-content/8 p-4">
-          <h4 class="text-xs font-semibold uppercase tracking-wider opacity-50 flex items-center gap-1.5 mb-3">
-            <.icon name="hero-plus-circle-micro" class="size-3.5" /> Other steps
-          </h4>
-          <.task_list tasks={freeform_tasks(@job)} empty="No extra steps." />
-          <form phx-submit="add_task" class="flex gap-2 mt-3">
-            <input
-              name="task[title]"
-              placeholder="Add your own step…"
-              autocomplete="off"
-              class="input input-xs flex-1 bg-base-100"
-            />
-            <button type="submit" class="btn btn-soft btn-xs">
-              <.icon name="hero-plus-micro" class="size-4" />
-            </button>
-          </form>
-        </div>
+        </.section>
 
         <%!-- Contacts --%>
-        <div class="mx-5 my-4 rounded-xl bg-indigo-500/8 border border-indigo-500/15 p-4">
-          <h4 class="text-xs font-semibold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5 mb-3">
-            <.icon name="hero-users-micro" class="size-3.5" /> Contacts
-          </h4>
-
+        <.section
+          key="contacts"
+          title="Contacts"
+          accent="text-indigo-400"
+          open={@open_sections}
+          summary={contacts_summary(@job)}
+        >
           <ul class="space-y-2.5 mb-4">
             <li
               :for={contact <- @job.contacts}
@@ -862,7 +905,9 @@ defmodule JobbanWeb.LaunchpadLive do
               </button>
             </div>
           </.form>
-        </div>
+        </.section>
+
+        <div class="h-2"></div>
       </div>
     </div>
 
@@ -948,6 +993,196 @@ defmodule JobbanWeb.LaunchpadLive do
     end
   end
 
+  # The lead: the single next action and why, computed from the plays + steps.
+  attr :job, :map, required: true
+  attr :assessing?, :boolean, required: true
+  attr :generating_guide?, :boolean, required: true
+
+  defp next_move(assigns) do
+    assigns = assign(assigns, :move, compute_next_move(assigns.job))
+
+    ~H"""
+    <div class="mx-5 mt-4 rounded-xl bg-primary/10 border border-primary/25 p-4">
+      <p class="text-[10px] font-semibold uppercase tracking-wider text-primary mb-2 flex items-center gap-1">
+        <.icon name="hero-bolt-micro" class="size-3" /> Do this next
+      </p>
+      <%= case @move do %>
+        <% :assess -> %>
+          <div class="flex items-center gap-2.5">
+            <p class="text-sm font-medium flex-1 leading-snug">
+              Assess this listing to see the best way in — usually better than a cold apply.
+            </p>
+            <button
+              :if={Strategist.enabled?()}
+              type="button"
+              class="btn btn-primary btn-xs shrink-0"
+              phx-click="reassess"
+              disabled={@assessing?}
+            >
+              {if @assessing?, do: "Assessing…", else: "Assess"}
+            </button>
+          </div>
+        <% {:guide, company} -> %>
+          <div class="flex items-center gap-2.5">
+            <p class="text-sm font-medium flex-1 leading-snug">
+              Networking is your highest-leverage way in — map out who to reach at {company}.
+            </p>
+            <button
+              :if={Networking.enabled?()}
+              type="button"
+              class="btn btn-primary btn-xs shrink-0"
+              phx-click="generate_guide"
+              disabled={@generating_guide?}
+            >
+              {if @generating_guide?, do: "Mapping…", else: "Find people"}
+            </button>
+          </div>
+        <% {:task, task, why} -> %>
+          <label class="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              phx-click="toggle_task"
+              phx-value-id={task.id}
+              class="checkbox checkbox-sm checkbox-primary mt-0.5 shrink-0"
+            />
+            <span class="min-w-0">
+              <span class="block text-sm font-medium leading-snug">{task.title}</span>
+              <span :if={why} class="text-xs opacity-60 leading-snug">{why}</span>
+            </span>
+          </label>
+        <% :done -> %>
+          <p class="text-sm font-medium flex items-center gap-1.5">
+            <.icon name="hero-check-circle-micro" class="size-4 text-emerald-500" />
+            Prep's done — drag it into Applied.
+          </p>
+        <% {:run, name} -> %>
+          <p class="text-sm font-medium leading-snug">
+            Start the <span class="font-semibold">{name}</span> play — open “The plan” below.
+          </p>
+      <% end %>
+    </div>
+    """
+  end
+
+  # A collapsible section: header (chevron + title + collapsed summary + actions)
+  # with the body shown only when its key is in @open_sections.
+  attr :key, :string, required: true
+  attr :title, :string, required: true
+  attr :accent, :string, default: "text-base-content/70"
+  attr :summary, :string, default: nil
+  attr :open, :any, required: true
+  slot :actions
+  slot :inner_block, required: true
+
+  defp section(assigns) do
+    assigns = assign(assigns, :open?, MapSet.member?(assigns.open, assigns.key))
+
+    ~H"""
+    <div class="mx-5 mt-2.5 rounded-xl border border-base-content/10 bg-base-200/40 overflow-hidden">
+      <div class="flex items-center gap-2 px-4 py-2.5">
+        <button
+          type="button"
+          phx-click="toggle_section"
+          phx-value-section={@key}
+          class="flex items-center gap-2 flex-1 min-w-0 text-left"
+        >
+          <.icon
+            name={if @open?, do: "hero-chevron-down-micro", else: "hero-chevron-right-micro"}
+            class="size-4 opacity-40 shrink-0"
+          />
+          <span class={["text-xs font-semibold uppercase tracking-wider shrink-0", @accent]}>
+            {@title}
+          </span>
+          <span :if={@summary && !@open?} class="text-xs opacity-50 truncate">· {@summary}</span>
+        </button>
+        {render_slot(@actions)}
+      </div>
+      <div :if={@open?} class="px-4 pb-4">{render_slot(@inner_block)}</div>
+    </div>
+    """
+  end
+
+  ## Next-move + section logic
+
+  defp compute_next_move(job) do
+    top = top_play(job)
+    task = next_task(job)
+
+    cond do
+      job.job_plays == [] -> :assess
+      top && top.slug == "networking" && job.networking_targets == [] -> {:guide, job.company}
+      task -> {:task, task, move_why(job, task)}
+      job.tasks != [] -> :done
+      top -> {:run, play_name(top.slug)}
+      true -> :done
+    end
+  end
+
+  defp top_play(job) do
+    job.job_plays
+    |> Enum.filter(&Plays.recommended?(&1.leverage))
+    |> Enum.sort_by(fn p ->
+      {leverage_rank(p.leverage), if(p.slug == "apply", do: 1, else: 0)}
+    end)
+    |> List.first()
+  end
+
+  defp next_task(job) do
+    lev = Map.new(job.job_plays, &{&1.slug, &1.leverage})
+
+    job.tasks
+    |> Enum.reject(& &1.done)
+    |> Enum.sort_by(fn t -> {leverage_rank(lev[t.play_slug]), t.position} end)
+    |> List.first()
+  end
+
+  defp move_why(job, task) do
+    case Enum.find(job.job_plays, &(&1.slug == task.play_slug)) do
+      nil ->
+        nil
+
+      p ->
+        "#{play_name(p.slug)} · #{p.leverage} leverage" <>
+          if(p.rationale, do: " — #{p.rationale}", else: "")
+    end
+  end
+
+  defp leverage_rank("high"), do: 0
+  defp leverage_rank("medium"), do: 1
+  defp leverage_rank("low"), do: 2
+  defp leverage_rank(_), do: 3
+
+  defp briefing_summary(%{job_brief: nil}), do: "not generated"
+  defp briefing_summary(_), do: "ready"
+
+  defp plays_summary(%{job_plays: []}), do: "tap to assess"
+
+  defp plays_summary(job) do
+    names =
+      job.job_plays
+      |> Enum.filter(&Plays.recommended?(&1.leverage))
+      |> Enum.reject(&(&1.slug == "apply"))
+      |> Enum.map_join(", ", &play_short(&1.slug))
+
+    base = if names == "", do: "cold apply", else: names
+    total = length(job.tasks)
+
+    if total > 0, do: "#{base} · #{Enum.count(job.tasks, & &1.done)}/#{total}", else: base
+  end
+
+  defp people_summary(%{networking_targets: []}), do: "not mapped"
+  defp people_summary(job), do: "#{length(job.networking_targets)} to reach"
+
+  defp contacts_summary(%{contacts: []}), do: "none yet"
+  defp contacts_summary(job), do: "#{length(job.contacts)} saved"
+
+  defp play_short(slug) do
+    case Plays.get(slug) do
+      nil -> slug
+      p -> p.short
+    end
+  end
+
   attr :label, :string, required: true
   attr :text, :string, required: true
 
@@ -969,7 +1204,7 @@ defmodule JobbanWeb.LaunchpadLive do
     assigns = assign(assigns, jp: jp, tasks: tasks)
 
     ~H"""
-    <div :if={@jp} class={["mx-5 mt-4 rounded-xl border p-4", play_panel_class(@jp.leverage)]}>
+    <div :if={@jp} class={["rounded-xl border p-3.5", play_panel_class(@jp.leverage)]}>
       <div class="flex items-center gap-2 mb-1.5">
         <h4 class="text-sm font-semibold flex items-center gap-1.5">{@play.name}</h4>
         <.leverage_badge leverage={@jp.leverage} />

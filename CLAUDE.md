@@ -68,8 +68,13 @@ project-specific context.
   view is a **matrix** (`Board.list_launchpad/0` rows — every wishlist job plus
   applied jobs with unfinished prep, ordered by fit/excitement/aging × play
   columns); each cell's glyph is derived from the play's leverage + its steps'
-  completion. A detail modal works one listing: a card per play (leverage badge
-  + rationale + its steps), freeform steps, and contacts. **Admin-only in
+  completion. The detail modal **leads with a "Do this next" card**
+  (`next_move/1` — the single next action + why, computed from the top
+  recommended play and its first open step; routes to assess / find-people /
+  a task / done) and collapses the depth into **server-tracked collapsible
+  sections** (`open_sections` MapSet + `toggle_section`; collapsed by default,
+  state survives the re-render that fires on every in-modal mutation): Briefing,
+  The plan (play cards + freeform steps), Who to reach, Contacts. **Admin-only in
   full** — redirects non-admins, since plays/contacts/prep are the strategic
   layer the board hides. Three per-job models in `Jobban.Board.*`: `JobPlay`
   (one per job×play — `leverage` high/medium/low/skip + `rationale` +
