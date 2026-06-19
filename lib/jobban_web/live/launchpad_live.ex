@@ -626,20 +626,20 @@ defmodule JobbanWeb.LaunchpadLive do
           </div>
         </.section>
 
-        <%!-- The plan: plays + steps --%>
-        <.section
-          key="plays"
-          title="The plan"
-          open={@open_sections}
-          summary={plays_summary(@job)}
-        >
-          <:actions>
+        <%!-- The whole checklist — always visible, every step, done included --%>
+        <div class="mx-5 mt-4">
+          <div class="flex items-center gap-2 mb-2.5">
+            <span class="text-xs font-semibold uppercase tracking-wider opacity-70">Checklist</span>
+            <span :if={@job.tasks != []} class="text-xs opacity-50 tabular-nums">
+              {Enum.count(@job.tasks, & &1.done)}/{length(@job.tasks)}
+            </span>
             <button
               :if={Strategist.enabled?()}
               type="button"
-              class="btn btn-ghost btn-xs gap-1 opacity-70 hover:opacity-100"
+              class="btn btn-ghost btn-xs gap-1 ml-auto opacity-70 hover:opacity-100"
               phx-click="reassess"
               disabled={@assessing?}
+              title="Re-run the strategist (replaces auto-generated steps)"
             >
               <.icon
                 name={if @assessing?, do: "hero-arrow-path-micro", else: "hero-sparkles-micro"}
@@ -647,36 +647,43 @@ defmodule JobbanWeb.LaunchpadLive do
               />
               {if @assessing?, do: "Assessing…", else: "Re-assess"}
             </button>
-          </:actions>
+          </div>
 
-          <p :if={@job.job_plays == []} class="text-sm opacity-60 italic leading-snug">
+          <p :if={@job.job_plays == []} class="text-sm opacity-60 italic leading-snug mb-2">
             Not assessed yet — {if Strategist.enabled?(),
-              do: "hit Re-assess to rate the ways in.",
+              do: "hit Re-assess to rate the ways in and lay out the steps.",
               else: "set an OpenRouter key to enable the strategist."}
           </p>
 
-          <div :if={@job.job_plays != []} class="space-y-2.5">
-            <.play_card :for={play <- @plays} job={@job} play={play} />
-          </div>
+          <div class="space-y-3.5">
+            <div :for={{play, tasks, leverage, rationale} <- checklist_groups(@job)}>
+              <div class="flex items-center gap-1.5">
+                <span class="text-sm font-medium">{play.name}</span>
+                <.leverage_badge :if={leverage} leverage={leverage} />
+              </div>
+              <p :if={rationale} class="text-xs opacity-55 leading-snug mt-0.5 mb-1.5">
+                {rationale}
+              </p>
+              <.task_list tasks={tasks} empty="" />
+            </div>
 
-          <div class="mt-3">
-            <p class="font-semibold uppercase tracking-wider text-[10px] opacity-50 mb-1.5">
-              Other steps
-            </p>
-            <.task_list tasks={freeform_tasks(@job)} empty="No extra steps." />
-            <form phx-submit="add_task" class="flex gap-2 mt-2">
-              <input
-                name="task[title]"
-                placeholder="Add your own step…"
-                autocomplete="off"
-                class="input input-xs flex-1 bg-base-100"
-              />
-              <button type="submit" class="btn btn-soft btn-xs">
-                <.icon name="hero-plus-micro" class="size-4" />
-              </button>
-            </form>
+            <div>
+              <p class="text-sm font-medium mb-1.5">Other steps</p>
+              <.task_list tasks={freeform_tasks(@job)} empty="No extra steps." />
+              <form phx-submit="add_task" class="flex gap-2 mt-2">
+                <input
+                  name="task[title]"
+                  placeholder="Add your own step…"
+                  autocomplete="off"
+                  class="input input-xs flex-1 bg-base-100"
+                />
+                <button type="submit" class="btn btn-soft btn-xs">
+                  <.icon name="hero-plus-micro" class="size-4" />
+                </button>
+              </form>
+            </div>
           </div>
-        </.section>
+        </div>
 
         <%!-- Who to reach + how to find them --%>
         <.section
@@ -1155,19 +1162,20 @@ defmodule JobbanWeb.LaunchpadLive do
   defp briefing_summary(%{job_brief: nil}), do: "not generated"
   defp briefing_summary(_), do: "ready"
 
-  defp plays_summary(%{job_plays: []}), do: "tap to assess"
+  # Every step grouped by its play, in catalog order — only plays that have
+  # steps. Each: {play, sorted tasks, leverage, rationale}. Done tasks included
+  # (the checklist shows them struck-through and stays uncheckable).
+  defp checklist_groups(job) do
+    by_play = Enum.group_by(job.tasks, & &1.play_slug)
+    jp = Map.new(job.job_plays, &{&1.slug, &1})
 
-  defp plays_summary(job) do
-    names =
-      job.job_plays
-      |> Enum.filter(&Plays.recommended?(&1.leverage))
-      |> Enum.reject(&(&1.slug == "apply"))
-      |> Enum.map_join(", ", &play_short(&1.slug))
-
-    base = if names == "", do: "cold apply", else: names
-    total = length(job.tasks)
-
-    if total > 0, do: "#{base} · #{Enum.count(job.tasks, & &1.done)}/#{total}", else: base
+    Plays.all()
+    |> Enum.map(fn play -> {play, Map.get(by_play, play.slug, [])} end)
+    |> Enum.reject(fn {_play, tasks} -> tasks == [] end)
+    |> Enum.map(fn {play, tasks} ->
+      j = jp[play.slug]
+      {play, Enum.sort_by(tasks, & &1.position), j && j.leverage, j && j.rationale}
+    end)
   end
 
   defp people_summary(%{networking_targets: []}), do: "not mapped"
@@ -1175,13 +1183,6 @@ defmodule JobbanWeb.LaunchpadLive do
 
   defp contacts_summary(%{contacts: []}), do: "none yet"
   defp contacts_summary(job), do: "#{length(job.contacts)} saved"
-
-  defp play_short(slug) do
-    case Plays.get(slug) do
-      nil -> slug
-      p -> p.short
-    end
-  end
 
   attr :label, :string, required: true
   attr :text, :string, required: true
@@ -1191,30 +1192,6 @@ defmodule JobbanWeb.LaunchpadLive do
     <div>
       <p class="font-semibold uppercase tracking-wider text-[10px] opacity-50 mb-1">{@label}</p>
       <p class="text-sm leading-relaxed opacity-85 whitespace-pre-line">{@text}</p>
-    </div>
-    """
-  end
-
-  attr :job, :map, required: true
-  attr :play, :map, required: true
-
-  defp play_card(assigns) do
-    jp = Enum.find(assigns.job.job_plays, &(&1.slug == assigns.play.slug))
-    tasks = tasks_for(assigns.job, assigns.play.slug)
-    assigns = assign(assigns, jp: jp, tasks: tasks)
-
-    ~H"""
-    <div :if={@jp} class={["rounded-xl border p-3.5", play_panel_class(@jp.leverage)]}>
-      <div class="flex items-center gap-2 mb-1.5">
-        <h4 class="text-sm font-semibold flex items-center gap-1.5">{@play.name}</h4>
-        <.leverage_badge leverage={@jp.leverage} />
-      </div>
-      <p :if={@jp.rationale} class="text-xs opacity-70 leading-snug mb-2.5">{@jp.rationale}</p>
-
-      <.task_list :if={@tasks != []} tasks={@tasks} empty="" />
-      <p :if={@tasks == [] && @jp.leverage != "skip"} class="text-xs opacity-40 italic">
-        No specific steps suggested.
-      </p>
     </div>
     """
   end
@@ -1351,9 +1328,6 @@ defmodule JobbanWeb.LaunchpadLive do
   defp leverage_badge_class("medium"), do: "bg-amber-500/15 text-amber-400"
   defp leverage_badge_class("low"), do: "bg-zinc-500/15 text-zinc-400"
   defp leverage_badge_class(_), do: "bg-base-content/10 opacity-50"
-
-  defp play_panel_class("skip"), do: "border-base-content/8 bg-base-200/40 opacity-60"
-  defp play_panel_class(_), do: "border-base-content/10 bg-base-200/50"
 
   defp fit_color(score) when score >= 4, do: "bg-emerald-500/15 text-emerald-500"
   defp fit_color(3), do: "bg-amber-500/15 text-amber-500"

@@ -33,22 +33,47 @@ defmodule JobbanWeb.LaunchpadLiveTest do
       for col <- ~w(Net Pitch Build Blog Apply), do: assert(html =~ col)
     end
 
-    test "opening a listing shows its plays and rationales", %{conn: conn, wishlist: wishlist} do
+    test "opening a listing shows the full checklist (always visible)", %{
+      conn: conn,
+      wishlist: wishlist
+    } do
       job = job_fixture(wishlist)
-      {:ok, _} = Board.record_assessment(job, [assessment("networking", "high", ["Ask Dana"])])
+
+      {:ok, _} =
+        Board.record_assessment(job, [assessment("networking", "high", ["Ask Dana", "DM the EM"])])
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
-      html = render_hook(view, "toggle_section", %{"section" => "plays"})
+      # checklist is not collapsed — both steps + the play rationale show on open
+      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
 
+      assert html =~ "Checklist"
       assert html =~ "Networking"
       assert html =~ "Ask Dana"
+      assert html =~ "DM the EM"
       assert html =~ "because networking"
+    end
+
+    test "completed steps stay visible and can be un-checked", %{conn: conn, wishlist: wishlist} do
+      job = job_fixture(wishlist)
+      {:ok, _} = Board.record_assessment(job, [assessment("build", "high", ["Ship a demo"])])
+      task = hd(Board.get_job!(job.id).tasks)
+      {:ok, _} = Board.toggle_task(task)
+
+      {:ok, view, _html} = live(conn, ~p"/launchpad")
+      # the done step is still on screen (not hidden behind "do this next")
+      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      assert html =~ "Ship a demo"
+
+      # un-check it
+      render_hook(view, "toggle_task", %{"id" => to_string(task.id)})
+      refute Board.get_task!(task.id).done
     end
 
     test "leads with a 'do this next' action", %{conn: conn, wishlist: wishlist} do
       job = job_fixture(wishlist)
-      {:ok, _} = Board.record_assessment(job, [assessment("build", "high", ["Ship a quick demo"])])
+
+      {:ok, _} =
+        Board.record_assessment(job, [assessment("build", "high", ["Ship a quick demo"])])
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
       html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()

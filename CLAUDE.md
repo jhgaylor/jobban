@@ -73,8 +73,11 @@ project-specific context.
   recommended play and its first open step; routes to assess / find-people /
   a task / done) and collapses the depth into **server-tracked collapsible
   sections** (`open_sections` MapSet + `toggle_section`; collapsed by default,
-  state survives the re-render that fires on every in-modal mutation): Briefing,
-  The plan (play cards + freeform steps), Who to reach, Contacts. **Admin-only in
+  state survives the re-render that fires on every in-modal mutation). Below the
+  lead, the **full checklist is always visible** (`checklist_groups/1` — every
+  step grouped by play with the play's leverage + rationale, done steps shown
+  struck-through and still uncheckable via `toggle_task`), then collapsible
+  Briefing, Who to reach, and Contacts. **Admin-only in
   full** — redirects non-admins, since plays/contacts/prep are the strategic
   layer the board hides. Three per-job models in `Jobban.Board.*`: `JobPlay`
   (one per job×play — `leverage` high/medium/low/skip + `rationale` +
