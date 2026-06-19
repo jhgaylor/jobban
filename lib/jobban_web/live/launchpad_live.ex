@@ -2,11 +2,19 @@ defmodule JobbanWeb.LaunchpadLive do
   use JobbanWeb, :live_view
 
   @moduledoc """
-  The private prep view for the wishlist→applied gap. A matrix of listings ×
-  plays: for each listing the strategist rates every way-in (networking, pitch,
-  build, blog, cold apply) for leverage and auto-populates the recommended
-  plays' steps. The matrix shows which listings need which plays at a glance;
-  the detail panel works one listing's plays, steps, and contacts.
+  The private prep view for the wishlist→applied gap, built as one flow rather
+  than a pile of features: pick the highest-leverage way in for each company and
+  walk through doing it, so you apply with an edge instead of cold.
+
+  The main view is a **priority queue** — listings ranked by fit/excitement/aging
+  (`Board.list_launchpad/0`), each row showing the recommended way in
+  (`queue_route/1`) and the single next action (`next_action_label/1`, mirroring
+  the detail's "Do this next" lead). The detail modal is a runway: a "Do this
+  next" lead card, then three ordered beats — **1 · Size it up** (the briefing),
+  **2 · The plan** (the full checklist, every step grouped by play), and
+  **3 · Reach out** (who to find, generated, flowing into your saved contacts).
+  The strategist (`Jobban.Strategist`) rates every way-in for leverage and
+  auto-populates the recommended plays' steps.
 
   Admin-only — everything here is the strategic layer the public board hides, so
   the whole page redirects non-admins rather than partially gating.
@@ -362,96 +370,39 @@ defmodule JobbanWeb.LaunchpadLive do
       </header>
 
       <main class="flex-1 overflow-auto px-4 sm:px-6 pb-6">
-        <div class="max-w-3xl mx-auto">
-          <div
-            :if={@jobs != []}
-            class="rounded-2xl bg-base-100 border border-base-content/8 shadow-sm overflow-x-auto"
-          >
-            <table class="w-full table-fixed text-sm border-collapse">
-              <thead>
-                <tr class="border-b border-base-content/10 text-[10px] uppercase tracking-wider opacity-50">
-                  <th class="text-left font-semibold py-2.5 pl-4 pr-2">Listing</th>
-                  <th
-                    :for={{play, idx} <- Enum.with_index(@plays)}
-                    class={[
-                      "font-semibold w-12 text-center",
-                      if(idx == 0,
-                        do: "border-l-2 border-base-content/10",
-                        else: "border-l border-base-content/5"
-                      )
-                    ]}
-                    title={play.name}
-                  >
-                    {play.short}
-                  </th>
-                  <th class="font-semibold w-16 px-3 text-right border-l-2 border-base-content/10">
-                    Prep
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  :for={job <- @jobs}
-                  phx-click="select_job"
-                  phx-value-id={job.id}
-                  class="border-b border-base-content/5 last:border-0 cursor-pointer hover:bg-base-content/[0.05] odd:bg-base-content/[0.015] transition-colors"
-                >
-                  <td class="py-2 pl-4 pr-3 max-w-0">
-                    <div class="flex items-center gap-2.5 min-w-0">
-                      <.company_avatar company={job.company} class="size-8 text-[11px]" />
-                      <div class="min-w-0">
-                        <div class="flex items-center gap-1.5 min-w-0">
-                          <span class="font-semibold truncate">{job.company}</span>
-                          <.fit_badge job={job} />
-                        </div>
-                        <p class="text-xs opacity-55 truncate">{job.title}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td
-                    :for={{play, idx} <- Enum.with_index(@plays)}
-                    class={[
-                      "text-center",
-                      if(idx == 0,
-                        do: "border-l-2 border-base-content/10",
-                        else: "border-l border-base-content/5"
-                      )
-                    ]}
-                  >
-                    <.play_cell job={job} slug={play.slug} />
-                  </td>
-                  <td class="text-right px-3 tabular-nums text-xs opacity-60 whitespace-nowrap border-l-2 border-base-content/10">
-                    {progress_label(job)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        <div class="max-w-2xl mx-auto">
+          <ul :if={@jobs != []} class="space-y-2">
+            <li :for={job <- @jobs}>
+              <button
+                type="button"
+                phx-click="select_job"
+                phx-value-id={job.id}
+                class="w-full text-left rounded-xl bg-base-100 border border-base-content/8 shadow-sm hover:border-base-content/20 hover:bg-base-content/[0.02] transition-colors p-3.5 flex items-center gap-3.5"
+              >
+                <.company_avatar company={job.company} class="size-10 text-sm" />
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="font-semibold truncate">{job.company}</span>
+                    <.fit_badge job={job} />
+                    <span class="text-xs opacity-50 truncate">· {job.title}</span>
+                  </div>
+                  <div class={["flex items-center gap-1 mt-0.5 text-xs", queue_route_color(job)]}>
+                    <.icon name={queue_route_icon(job)} class="size-3 shrink-0" />
+                    <span class="truncate font-medium">{queue_route(job)}</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 mt-1.5 text-sm">
+                    <.icon name="hero-arrow-right-micro" class="size-3.5 opacity-40 shrink-0" />
+                    <span class="truncate">{next_action_label(job)}</span>
+                  </div>
+                </div>
+                <.progress_meter job={job} />
+              </button>
+            </li>
+          </ul>
 
           <div :if={@jobs == []} class="text-center py-20 opacity-50">
             <.icon name="hero-check-circle" class="size-10 mx-auto mb-3 opacity-40" />
             <p class="text-sm">Nothing waiting on prep — every wishlist is launched.</p>
-          </div>
-
-          <div
-            :if={@jobs != []}
-            class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 px-1 text-[11px] opacity-50"
-          >
-            <span class="flex items-center gap-1">
-              <span class="text-emerald-400 font-bold">●</span> high
-            </span>
-            <span class="flex items-center gap-1">
-              <span class="text-amber-400 font-bold">●</span> medium
-            </span>
-            <span class="flex items-center gap-1">
-              <span class="text-zinc-400 font-bold">●</span> low
-            </span>
-            <span class="flex items-center gap-1"><span class="font-bold">◐</span> in progress</span>
-            <span class="flex items-center gap-1">
-              <span class="text-emerald-400 font-bold">✓</span> done
-            </span>
-            <span class="flex items-center gap-1"><span>·</span> skip</span>
-            <span class="flex items-center gap-1"><span>–</span> not assessed</span>
           </div>
         </div>
       </main>
@@ -473,34 +424,80 @@ defmodule JobbanWeb.LaunchpadLive do
     """
   end
 
+  # Queue row: the recommended way in, classified once into :unassessed /
+  # :front (cold apply) / :side (a higher-leverage play).
+  defp queue_route_kind(job) do
+    cond do
+      job.job_plays == [] ->
+        :unassessed
+
+      true ->
+        case top_play(job) do
+          nil -> :front
+          %{slug: "apply"} -> :front
+          top -> {:side, top.slug}
+        end
+    end
+  end
+
+  defp queue_route(job) do
+    case queue_route_kind(job) do
+      :unassessed -> "Not assessed yet"
+      :front -> "Front door · cold apply"
+      {:side, slug} -> "Side door · #{play_name(slug)}"
+    end
+  end
+
+  defp queue_route_color(job) do
+    case queue_route_kind(job) do
+      :unassessed -> "opacity-50"
+      :front -> "opacity-60"
+      {:side, _} -> "text-sky-500"
+    end
+  end
+
+  defp queue_route_icon(job) do
+    case queue_route_kind(job) do
+      :unassessed -> "hero-sparkles-micro"
+      :front -> "hero-arrow-right-end-on-rectangle-micro"
+      {:side, _} -> "hero-arrow-trending-up-micro"
+    end
+  end
+
+  # The single next action, as a short label for the queue row (mirrors the
+  # detail's "Do this next" lead).
+  defp next_action_label(job) do
+    case compute_next_move(job) do
+      :assess -> "Size it up"
+      {:guide, _company} -> "Map out who to reach"
+      {:task, task, _why} -> task.title
+      {:run, name} -> "Start the #{name} play"
+      :done -> "Ready — drag into Applied"
+    end
+  end
+
   attr :job, :map, required: true
-  attr :slug, :string, required: true
 
-  defp play_cell(assigns) do
-    {state, leverage} = play_state(assigns.job, assigns.slug)
-    jp = Enum.find(assigns.job.job_plays, &(&1.slug == assigns.slug))
-
-    assigns =
-      assign(assigns, state: state, color: leverage_color(leverage), title: jp && jp.rationale)
+  defp progress_meter(assigns) do
+    total = length(assigns.job.tasks)
+    done = Enum.count(assigns.job.tasks, & &1.done)
+    pct = if total == 0, do: 0, else: round(done / total * 100)
+    assigns = assign(assigns, total: total, done: done, pct: pct)
 
     ~H"""
-    <span
-      class={["inline-block py-2 text-base font-bold select-none leading-none", @color]}
-      title={@title}
-    >
-      <%= case @state do %>
-        <% :done -> %>
-          ✓
-        <% :in_progress -> %>
-          ◐
-        <% :recommended -> %>
-          ●
-        <% :skip -> %>
-          <span class="opacity-30">·</span>
-        <% :unassessed -> %>
-          <span class="opacity-30">–</span>
-      <% end %>
-    </span>
+    <div class="shrink-0 w-14 text-right">
+      <div class="text-xs tabular-nums opacity-60">{@done}/{@total}</div>
+      <div class="mt-1 h-1.5 rounded-full bg-base-content/10 overflow-hidden">
+        <div
+          class={[
+            "h-full rounded-full",
+            if(@total > 0 && @done == @total, do: "bg-emerald-500", else: "bg-primary")
+          ]}
+          style={"width: #{@pct}%"}
+        >
+        </div>
+      </div>
+    </div>
     """
   end
 
@@ -575,10 +572,10 @@ defmodule JobbanWeb.LaunchpadLive do
 
         <.next_move job={@job} assessing?={@assessing?} generating_guide?={@generating_guide?} />
 
-        <%!-- Briefing --%>
+        <%!-- Step 1 · Size it up (the briefing) --%>
         <.section
           key="briefing"
-          title="Briefing"
+          title="1 · Size it up"
           accent="text-cyan-400"
           open={@open_sections}
           summary={briefing_summary(@job)}
@@ -626,10 +623,12 @@ defmodule JobbanWeb.LaunchpadLive do
           </div>
         </.section>
 
-        <%!-- The whole checklist — always visible, every step, done included --%>
+        <%!-- Step 2 · The plan — the whole checklist, always visible, done included --%>
         <div class="mx-5 mt-4">
           <div class="flex items-center gap-2 mb-2.5">
-            <span class="text-xs font-semibold uppercase tracking-wider opacity-70">Checklist</span>
+            <span class="text-xs font-semibold uppercase tracking-wider opacity-70">
+              2 · The plan
+            </span>
             <span :if={@job.tasks != []} class="text-xs opacity-50 tabular-nums">
               {Enum.count(@job.tasks, & &1.done)}/{length(@job.tasks)}
             </span>
@@ -685,13 +684,13 @@ defmodule JobbanWeb.LaunchpadLive do
           </div>
         </div>
 
-        <%!-- Who to reach + how to find them --%>
+        <%!-- Step 3 · Reach out — who to find (generated) flowing into saved contacts --%>
         <.section
           key="people"
-          title="Who to reach"
+          title="3 · Reach out"
           accent="text-indigo-400"
           open={@open_sections}
-          summary={people_summary(@job)}
+          summary={outreach_summary(@job)}
         >
           <:actions>
             <button
@@ -713,9 +712,12 @@ defmodule JobbanWeb.LaunchpadLive do
             </button>
           </:actions>
 
+          <p class="text-[10px] font-semibold uppercase tracking-wider opacity-50 mb-1.5">
+            Who to reach
+          </p>
           <p
             :if={@job.networking_targets == [] && !@generating_guide?}
-            class="text-sm opacity-60 italic leading-snug"
+            class="text-sm opacity-60 italic leading-snug mb-3"
           >
             Find out who to contact at {@job.company} and exactly how to find them.
           </p>
@@ -763,16 +765,10 @@ defmodule JobbanWeb.LaunchpadLive do
               </div>
             </li>
           </ul>
-        </.section>
 
-        <%!-- Contacts --%>
-        <.section
-          key="contacts"
-          title="Contacts"
-          accent="text-indigo-400"
-          open={@open_sections}
-          summary={contacts_summary(@job)}
-        >
+          <p class="text-[10px] font-semibold uppercase tracking-wider opacity-50 mt-4 mb-1.5">
+            Your contacts
+          </p>
           <ul class="space-y-2.5 mb-4">
             <li
               :for={contact <- @job.contacts}
@@ -1178,11 +1174,16 @@ defmodule JobbanWeb.LaunchpadLive do
     end)
   end
 
-  defp people_summary(%{networking_targets: []}), do: "not mapped"
-  defp people_summary(job), do: "#{length(job.networking_targets)} to reach"
+  defp outreach_summary(job) do
+    reach = length(job.networking_targets)
+    saved = length(job.contacts)
 
-  defp contacts_summary(%{contacts: []}), do: "none yet"
-  defp contacts_summary(job), do: "#{length(job.contacts)} saved"
+    parts =
+      [reach > 0 && "#{reach} to reach", saved > 0 && "#{saved} saved"]
+      |> Enum.filter(& &1)
+
+    if parts == [], do: "no one yet", else: Enum.join(parts, " · ")
+  end
 
   attr :label, :string, required: true
   attr :text, :string, required: true
@@ -1276,22 +1277,6 @@ defmodule JobbanWeb.LaunchpadLive do
 
   ## Logic helpers
 
-  defp play_state(job, slug) do
-    jp = Enum.find(job.job_plays, &(&1.slug == slug))
-    tasks = tasks_for(job, slug)
-
-    state =
-      cond do
-        jp == nil -> :unassessed
-        jp.leverage == "skip" -> :skip
-        tasks != [] and Enum.all?(tasks, & &1.done) -> :done
-        Enum.any?(tasks, & &1.done) -> :in_progress
-        true -> :recommended
-      end
-
-    {state, jp && jp.leverage}
-  end
-
   defp route_label(job) do
     recommended =
       Enum.filter(job.job_plays, &(Plays.recommended?(&1.leverage) and &1.slug != "apply"))
@@ -1303,14 +1288,7 @@ defmodule JobbanWeb.LaunchpadLive do
     end
   end
 
-  defp tasks_for(job, slug), do: Enum.filter(job.tasks, &(&1.play_slug == slug))
   defp freeform_tasks(job), do: Enum.filter(job.tasks, &is_nil(&1.play_slug))
-
-  defp progress_label(job) do
-    total = length(job.tasks)
-    done = Enum.count(job.tasks, & &1.done)
-    "#{done}/#{total}"
-  end
 
   defp play_name(slug) do
     case Plays.get(slug) do
@@ -1318,11 +1296,6 @@ defmodule JobbanWeb.LaunchpadLive do
       play -> play.name
     end
   end
-
-  defp leverage_color("high"), do: "text-emerald-400"
-  defp leverage_color("medium"), do: "text-amber-400"
-  defp leverage_color("low"), do: "text-zinc-400"
-  defp leverage_color(_), do: "opacity-30"
 
   defp leverage_badge_class("high"), do: "bg-emerald-500/15 text-emerald-400"
   defp leverage_badge_class("medium"), do: "bg-amber-500/15 text-amber-400"

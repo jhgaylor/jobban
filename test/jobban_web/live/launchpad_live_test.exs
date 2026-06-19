@@ -24,13 +24,31 @@ defmodule JobbanWeb.LaunchpadLiveTest do
       %{conn: log_in_admin(conn)}
     end
 
-    test "renders the matrix with play columns and listings", %{conn: conn, wishlist: wishlist} do
+    test "renders the queue with listings and their next action", %{
+      conn: conn,
+      wishlist: wishlist
+    } do
       job_fixture(wishlist, %{"company" => "Tailscale", "title" => "Platform Eng"})
 
       {:ok, _view, html} = live(conn, ~p"/launchpad")
 
       assert html =~ "Tailscale"
-      for col <- ~w(Net Pitch Build Blog Apply), do: assert(html =~ col)
+      # an unassessed listing's next move in the queue is to size it up
+      assert html =~ "Not assessed yet"
+      assert html =~ "Size it up"
+    end
+
+    test "queue row surfaces the recommended side door once assessed", %{
+      conn: conn,
+      wishlist: wishlist
+    } do
+      job = job_fixture(wishlist, %{"company" => "Tailscale"})
+      {:ok, _} = Board.record_assessment(job, [assessment("networking", "high", ["DM the EM"])])
+
+      {:ok, _view, html} = live(conn, ~p"/launchpad")
+
+      assert html =~ "Side door"
+      assert html =~ "Networking"
     end
 
     test "opening a listing shows the full checklist (always visible)", %{
@@ -44,9 +62,9 @@ defmodule JobbanWeb.LaunchpadLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
       # checklist is not collapsed — both steps + the play rationale show on open
-      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      html = view |> element("button[phx-value-id='#{job.id}']") |> render_click()
 
-      assert html =~ "Checklist"
+      assert html =~ "The plan"
       assert html =~ "Networking"
       assert html =~ "Ask Dana"
       assert html =~ "DM the EM"
@@ -61,7 +79,7 @@ defmodule JobbanWeb.LaunchpadLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
       # the done step is still on screen (not hidden behind "do this next")
-      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      html = view |> element("button[phx-value-id='#{job.id}']") |> render_click()
       assert html =~ "Ship a demo"
 
       # un-check it
@@ -76,7 +94,7 @@ defmodule JobbanWeb.LaunchpadLiveTest do
         Board.record_assessment(job, [assessment("build", "high", ["Ship a quick demo"])])
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      html = view |> element("button[phx-value-id='#{job.id}']") |> render_click()
 
       # the lead card is always visible (not collapsed) and names the next step + why
       assert html =~ "Do this next"
@@ -92,7 +110,7 @@ defmodule JobbanWeb.LaunchpadLiveTest do
       {:ok, _} = Board.record_assessment(job, [assessment("networking", "high", ["intro"])])
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      html = view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      html = view |> element("button[phx-value-id='#{job.id}']") |> render_click()
 
       assert html =~ "Do this next"
       assert html =~ "map out who to reach"
@@ -103,7 +121,7 @@ defmodule JobbanWeb.LaunchpadLiveTest do
       {:ok, _} = Board.record_assessment(job, [assessment("build", "high", ["Ship a demo"])])
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      view |> element("button[phx-value-id='#{job.id}']") |> render_click()
 
       task = hd(Board.get_job!(job.id).tasks)
       render_hook(view, "toggle_task", %{"id" => to_string(task.id)})
@@ -114,7 +132,7 @@ defmodule JobbanWeb.LaunchpadLiveTest do
     test "adding a freeform step persists", %{conn: conn, wishlist: wishlist} do
       job = job_fixture(wishlist)
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      view |> element("button[phx-value-id='#{job.id}']") |> render_click()
 
       render_hook(view, "add_task", %{"task" => %{"title" => "Cold email the CTO"}})
 
@@ -136,7 +154,7 @@ defmodule JobbanWeb.LaunchpadLiveTest do
         ])
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      view |> element("button[phx-value-id='#{job.id}']") |> render_click()
       html = render_hook(view, "toggle_section", %{"section" => "people"})
 
       assert html =~ "Who to reach"
@@ -158,10 +176,10 @@ defmodule JobbanWeb.LaunchpadLiveTest do
         })
 
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      view |> element("button[phx-value-id='#{job.id}']") |> render_click()
       html = render_hook(view, "toggle_section", %{"section" => "briefing"})
 
-      assert html =~ "Briefing"
+      assert html =~ "Size it up"
       assert html =~ "They run payments infrastructure."
       assert html =~ "Why it matters to them"
       assert html =~ "Directly protects revenue."
@@ -170,14 +188,14 @@ defmodule JobbanWeb.LaunchpadLiveTest do
     test "adding a contact persists and shows up", %{conn: conn, wishlist: wishlist} do
       job = job_fixture(wishlist)
       {:ok, view, _html} = live(conn, ~p"/launchpad")
-      view |> element("tr[phx-value-id='#{job.id}']") |> render_click()
+      view |> element("button[phx-value-id='#{job.id}']") |> render_click()
 
       render_hook(view, "add_contact", %{
         "contact" => %{"name" => "Dana Reed", "role" => "Recruiter"}
       })
 
       assert [%{name: "Dana Reed"}] = Board.get_job!(job.id).contacts
-      html = render_hook(view, "toggle_section", %{"section" => "contacts"})
+      html = render_hook(view, "toggle_section", %{"section" => "people"})
       assert html =~ "Dana Reed"
     end
   end

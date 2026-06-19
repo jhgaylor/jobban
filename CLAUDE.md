@@ -61,25 +61,29 @@ project-specific context.
   space; config `importer_block_private_hosts`, off in test so stubs
   don't need DNS).
 - **Launchpad** (`JobbanWeb.LaunchpadLive`, `/launchpad`): the private
-  wishlist→applied prep view, built around **plays** — the ways into a company
-  beyond the front door. The catalog is codified in `Jobban.Board.Plays`
-  (`networking`, `pitch`, `build`, `blog`, `apply`; add one there and it flows
-  through the strategist prompt, matrix columns, and task generation). The main
-  view is a **matrix** (`Board.list_launchpad/0` rows — every wishlist job plus
-  applied jobs with unfinished prep, ordered by fit/excitement/aging × play
-  columns); each cell's glyph is derived from the play's leverage + its steps'
-  completion. The detail modal **leads with a "Do this next" card**
-  (`next_move/1` — the single next action + why, computed from the top
-  recommended play and its first open step; routes to assess / find-people /
-  a task / done) and collapses the depth into **server-tracked collapsible
-  sections** (`open_sections` MapSet + `toggle_section`; collapsed by default,
-  state survives the re-render that fires on every in-modal mutation). Below the
-  lead, the **full checklist is always visible** (`checklist_groups/1` — every
-  step grouped by play with the play's leverage + rationale, done steps shown
-  struck-through and still uncheckable via `toggle_task`), then collapsible
-  Briefing, Who to reach, and Contacts. **Admin-only in
-  full** — redirects non-admins, since plays/contacts/prep are the strategic
-  layer the board hides. Three per-job models in `Jobban.Board.*`: `JobPlay`
+  wishlist→applied prep view, built as **one flow, not a feature pile** — pick
+  the highest-leverage way in for each company and walk through doing it, so you
+  apply with an edge instead of cold. The ways in are **plays**, codified in
+  `Jobban.Board.Plays` (`networking`, `pitch`, `build`, `blog`, `apply`; add one
+  there and it flows through the strategist prompt, the queue's route, and task
+  generation). The main view is a **priority queue** (`Board.list_launchpad/0`
+  rows — every wishlist job plus applied jobs with unfinished prep, ordered by
+  fit/excitement/aging); each row shows the recommended way in (`queue_route/1`:
+  side door · <play> / front door / not assessed) and the single next action
+  (`next_action_label/1`) with a prep meter. The detail modal is a **runway**:
+  it **leads with a "Do this next" card** (`compute_next_move/1` — the single
+  next action + why, from the top recommended play and its first open step;
+  routes to assess / find-people / a task / done), then three ordered beats —
+  **1 · Size it up** (the briefing), **2 · The plan** (the full checklist,
+  always visible — `checklist_groups/1` groups every step by play with leverage
+  + rationale, done steps struck-through and still uncheckable via
+  `toggle_task`), and **3 · Reach out** (who to find, generated, flowing into
+  your saved contacts — the old "Who to reach" and "Contacts" are now one
+  section). The collapsible beats are **server-tracked** (`open_sections` MapSet
+  + `toggle_section`; collapsed by default, state survives the re-render that
+  fires on every in-modal mutation). **Admin-only in full** — redirects
+  non-admins, since plays/contacts/prep are the strategic layer the board hides.
+  Three per-job models in `Jobban.Board.*`: `JobPlay`
   (one per job×play — `leverage` high/medium/low/skip + `rationale` +
   `assessed_at`), `Task` (a prep step; steps from a recommended play carry that
   `play_slug`, freeform ones nil; `done`/`done_at`/`position`), and `Contact`
@@ -92,7 +96,7 @@ project-specific context.
   (wipes machine steps, keeps freeform). Dragging a card into `applied`
   auto-checks the cold-apply play's steps inside `move_job/3` (the board move
   is source of truth). LLM is always an enhancement — an unassessed job just
-  shows a blank matrix row until assessed.
+  shows a "Not assessed yet · Size it up" row until assessed.
 - **Networking help** (`Jobban.Networking`, the detail's "Who to reach"
   section): since the networking play is near-universally high-leverage, this
   demystifies the *who/how*. `guide/1` (on-demand) generates per-listing
