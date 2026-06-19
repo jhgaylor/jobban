@@ -437,6 +437,7 @@ defmodule Jobban.Board do
                 "label" => target.label,
                 "title_hint" => target[:title_hint],
                 "why" => target[:why],
+                "searches" => search_attrs(target[:searches]),
                 "how_to_find" => target[:how_to_find],
                 "referral_path" => target[:referral_path],
                 "position" => position
@@ -449,6 +450,16 @@ defmodule Jobban.Board do
         {:ok, get_job(id)}
     end
   end
+
+  # Normalize searches to string-keyed maps so what's stored matches what's read
+  # back from jsonb. Accepts atom-keyed (from the LLM normalizer) or string-keyed.
+  defp search_attrs(searches) when is_list(searches) do
+    Enum.map(searches, fn s ->
+      %{"query" => s[:query] || s["query"], "platform" => s[:platform] || s["platform"]}
+    end)
+  end
+
+  defp search_attrs(_), do: []
 
   ## Briefing — the per-listing company/role explainer
 

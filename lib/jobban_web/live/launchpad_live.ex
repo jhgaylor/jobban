@@ -745,6 +745,38 @@ defmodule JobbanWeb.LaunchpadLive do
                 </button>
               </div>
               <p :if={t.why} class="text-xs opacity-70 mt-1 leading-snug">{t.why}</p>
+              <div :if={t.searches not in [nil, []]} class="mt-2">
+                <p class="font-semibold uppercase tracking-wider text-[10px] opacity-50 mb-1.5 flex items-center gap-1">
+                  <.icon name="hero-magnifying-glass-micro" class="size-3" /> Searches to run
+                </p>
+                <ul class="space-y-1">
+                  <li :for={{s, i} <- Enum.with_index(t.searches)} class="flex items-center gap-1.5">
+                    <a
+                      href={search_url(s["platform"], s["query"])}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={"Run on #{search_platform_label(s["platform"])}"}
+                      class="flex-1 min-w-0 inline-flex items-center gap-1.5 rounded-md bg-base-200/70 hover:bg-base-200 border border-base-content/10 px-2 py-1 transition-colors"
+                    >
+                      <.icon name={search_icon(s["platform"])} class="size-3 opacity-60 shrink-0" />
+                      <span class="font-mono text-xs truncate">{s["query"]}</span>
+                      <.icon
+                        name="hero-arrow-top-right-on-square-micro"
+                        class="size-3 opacity-40 shrink-0 ml-auto"
+                      />
+                    </a>
+                    <button
+                      id={"copy-search-#{t.id}-#{i}"}
+                      phx-hook="Copy"
+                      data-copy={s["query"]}
+                      class="btn btn-ghost btn-xs gap-1 shrink-0"
+                    >
+                      <.icon name="hero-clipboard-document-micro" class="size-3" />
+                      <span data-copy-label>Copy</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
               <div
                 :if={t.referral_path}
                 class="mt-2 rounded-md bg-emerald-500/8 border border-emerald-500/15 p-2.5 text-xs leading-relaxed"
@@ -1173,6 +1205,21 @@ defmodule JobbanWeb.LaunchpadLive do
       {play, Enum.sort_by(tasks, & &1.position), j && j.leverage, j && j.rationale}
     end)
   end
+
+  # A networking search rendered as a one-click, pre-filled search URL.
+  defp search_url("google", query),
+    do: "https://www.google.com/search?q=" <> URI.encode_www_form(query || "")
+
+  defp search_url(_linkedin, query),
+    do:
+      "https://www.linkedin.com/search/results/people/?keywords=" <>
+        URI.encode_www_form(query || "")
+
+  defp search_icon("google"), do: "hero-magnifying-glass-micro"
+  defp search_icon(_linkedin), do: "hero-user-group-micro"
+
+  defp search_platform_label("google"), do: "Google"
+  defp search_platform_label(_linkedin), do: "LinkedIn"
 
   defp outreach_summary(job) do
     reach = length(job.networking_targets)

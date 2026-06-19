@@ -98,13 +98,41 @@ defmodule Jobban.Networking do
       label: trimmed(t["label"]),
       title_hint: trimmed(t["title_hint"]),
       why: trimmed(t["why"]),
+      searches: normalize_searches(t["searches"]),
       how_to_find: trimmed(t["how_to_find"]),
       referral_path: trimmed(t["referral_path"])
     }
   end
 
   defp normalize_target(_),
-    do: %{label: nil, title_hint: nil, why: nil, how_to_find: nil, referral_path: nil}
+    do: %{
+      label: nil,
+      title_hint: nil,
+      why: nil,
+      searches: [],
+      how_to_find: nil,
+      referral_path: nil
+    }
+
+  # Ready-to-run searches: each %{query, platform}. Drop blanks, cap at 4.
+  defp normalize_searches(list) when is_list(list) do
+    list
+    |> Enum.map(fn
+      s when is_map(s) -> %{query: trimmed(s["query"]), platform: platform(s["platform"])}
+      q when is_binary(q) -> %{query: trimmed(q), platform: "linkedin"}
+      _ -> %{query: nil, platform: "linkedin"}
+    end)
+    |> Enum.reject(&(&1.query in [nil, ""]))
+    |> Enum.take(4)
+  end
+
+  defp normalize_searches(_), do: []
+
+  defp platform(p) when is_binary(p) do
+    if String.downcase(String.trim(p)) == "google", do: "google", else: "linkedin"
+  end
+
+  defp platform(_), do: "linkedin"
 
   @doc false
   def parse_draft(response) when is_binary(response) do
@@ -140,13 +168,21 @@ defmodule Jobban.Networking do
       "title_hint"  — the likely job title for THIS role's context, e.g.
                       "Engineering Manager, Payments Platform" (best guess)
       "why"          — one sentence on why this person is worth reaching
-      "how_to_find"  — concrete, specific steps to find them. Name the exact
-                       moves: the LinkedIn search/filter to run (give the search
-                       text), how to infer the hiring manager (the person this
-                       role reports up to), checking the posting for a named
-                       recruiter, the company People tab filtered by title, and
-                       how to spot a warm/mutual connection. Be a teacher, not
-                       vague.
+      "searches"     — an array of 2-4 ready-to-run searches to find THIS person,
+                       each an object with:
+                         "query"    — the literal text to paste into the search
+                                      box, specific to this company/role/title,
+                                      e.g. Acme "Engineering Manager" payments —
+                                      use real operators (quotes, site:) where
+                                      they help. No placeholders.
+                         "platform" — "linkedin" or "google"
+                       Make them genuinely runnable, ordered most-likely-to-work
+                       first.
+      "how_to_find"  — the judgment the searches can't capture: how to infer the
+                       hiring manager (who this role reports up to), reading the
+                       posting for a named recruiter, and how to spot a
+                       warm/mutual connection. One or two sentences; the literal
+                       queries live in "searches".
       "referral_path" — the POINT of this contact: what to actually get from
                        them and the concrete move to turn it into a referral or
                        a real advance (e.g. "ask for 15 min of advice, then if

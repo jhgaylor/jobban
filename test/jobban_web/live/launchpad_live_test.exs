@@ -148,6 +148,7 @@ defmodule JobbanWeb.LaunchpadLiveTest do
             label: "Hiring manager",
             title_hint: "EM, Platform",
             why: "owns the req",
+            searches: [%{query: "Acme Engineering Manager", platform: "linkedin"}],
             how_to_find: "Filter the company People tab by 'engineering manager'",
             referral_path: "Ask for 15 min of advice, then ask them to flag your app"
           }
@@ -163,6 +164,10 @@ defmodule JobbanWeb.LaunchpadLiveTest do
       assert html =~ "Filter the company People tab"
       assert html =~ "Turn it into a referral"
       assert html =~ "Ask for 15 min of advice"
+      # the explicit, runnable search + its one-click pre-filled LinkedIn URL
+      assert html =~ "Searches to run"
+      assert html =~ "Acme Engineering Manager"
+      assert html =~ "linkedin.com/search/results/people/?keywords=Acme+Engineering+Manager"
     end
 
     test "shows a generated briefing", %{conn: conn, wishlist: wishlist} do

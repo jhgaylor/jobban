@@ -10,7 +10,7 @@ defmodule Jobban.NetworkingTest do
   describe "parse_guide/1" do
     test "keeps targets and trims fields" do
       json = ~s({"targets": [
-        {"label": "Hiring manager", "title_hint": " EM, Platform ", "why": "owns the req", "how_to_find": "search LinkedIn", "referral_path": "ask for advice, then a referral"},
+        {"label": "Hiring manager", "title_hint": " EM, Platform ", "why": "owns the req", "searches": [{"query": "Acme Engineering Manager payments", "platform": "linkedin"}, {"query": " Acme tech recruiter ", "platform": "google"}], "how_to_find": "search LinkedIn", "referral_path": "ask for advice, then a referral"},
         {"label": "Recruiter"}
       ]})
 
@@ -18,9 +18,29 @@ defmodule Jobban.NetworkingTest do
       assert hm.label == "Hiring manager"
       assert hm.title_hint == "EM, Platform"
       assert hm.referral_path == "ask for advice, then a referral"
+
+      assert hm.searches == [
+               %{query: "Acme Engineering Manager payments", platform: "linkedin"},
+               %{query: "Acme tech recruiter", platform: "google"}
+             ]
+
       assert rec.label == "Recruiter"
       assert rec.how_to_find == nil
       assert rec.referral_path == nil
+      assert rec.searches == []
+    end
+
+    test "normalizes loose search shapes (bare strings, unknown platform)" do
+      json = ~s({"targets": [
+        {"label": "IC", "searches": ["just a string", {"query": "x", "platform": "twitter"}, {"query": "  "}]}
+      ]})
+
+      assert {:ok, [ic]} = Networking.parse_guide(json)
+
+      assert ic.searches == [
+               %{query: "just a string", platform: "linkedin"},
+               %{query: "x", platform: "linkedin"}
+             ]
     end
 
     test "rejects payloads without a targets list" do
@@ -65,7 +85,7 @@ defmodule Jobban.NetworkingTest do
             %{
               "message" => %{
                 "content" =>
-                  ~s({"targets": [{"label": "Recruiter", "title_hint": "Tech Recruiter", "why": "easy first touch", "how_to_find": "named on the posting"}]})
+                  ~s({"targets": [{"label": "Recruiter", "title_hint": "Tech Recruiter", "why": "easy first touch", "searches": [{"query": "Acme tech recruiter", "platform": "google"}], "how_to_find": "named on the posting"}]})
               }
             }
           ]
@@ -74,8 +94,11 @@ defmodule Jobban.NetworkingTest do
 
       assert {:ok, _} = Networking.guide(job)
 
-      assert [%{label: "Recruiter", how_to_find: "named on the posting"}] =
+      assert [%{label: "Recruiter", how_to_find: "named on the posting", searches: searches}] =
                Board.get_job!(job.id).networking_targets
+
+      # round-trips through jsonb as string-keyed maps
+      assert searches == [%{"query" => "Acme tech recruiter", "platform" => "google"}]
     end
 
     test "draft returns both channels", %{job: job} do
