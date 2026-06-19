@@ -26,6 +26,15 @@ defmodule Jobban.Networking do
     Application.get_env(:jobban, :networking_enabled, true) and OpenRouter.configured?()
   end
 
+  @doc "Fire-and-forget networking guide for one job. No-op when disabled."
+  def guide_async(%Job{} = job) do
+    if enabled?() do
+      Task.Supervisor.start_child(Jobban.TaskSupervisor, fn -> guide(job) end)
+    end
+
+    :ok
+  end
+
   @doc """
   Generates and persists the "who to reach + how to find them" targets for a
   job. Returns the updated job, or `{:error, reason}`.

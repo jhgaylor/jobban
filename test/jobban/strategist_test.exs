@@ -38,6 +38,35 @@ defmodule Jobban.StrategistTest do
     end
   end
 
+  describe "followups/2" do
+    defp job_with(brief, targets), do: %{job_brief: brief, networking_targets: targets}
+    defp assess_plays(pairs), do: Enum.map(pairs, fn {s, l} -> %{slug: s, leverage: l} end)
+
+    test "kicks brief + guide when nothing exists and networking is recommended" do
+      job = job_with(nil, [])
+      plays = assess_plays([{"networking", "high"}, {"apply", "skip"}])
+      assert Jobban.Strategist.followups(job, plays) == [:brief, :guide]
+    end
+
+    test "skips the brief once one exists" do
+      job = job_with(%{company_overview: "x"}, [])
+      plays = assess_plays([{"networking", "medium"}])
+      assert Jobban.Strategist.followups(job, plays) == [:guide]
+    end
+
+    test "skips the guide when networking isn't recommended" do
+      job = job_with(nil, [])
+      plays = assess_plays([{"networking", "skip"}, {"build", "high"}])
+      assert Jobban.Strategist.followups(job, plays) == [:brief]
+    end
+
+    test "skips the guide when targets are already mapped" do
+      job = job_with(%{company_overview: "x"}, [%{label: "Hiring manager"}])
+      plays = assess_plays([{"networking", "high"}])
+      assert Jobban.Strategist.followups(job, plays) == []
+    end
+  end
+
   describe "assess/1" do
     setup do
       Application.put_env(:jobban, :openrouter_api_key, "test-key")

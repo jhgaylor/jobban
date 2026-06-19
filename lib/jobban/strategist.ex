@@ -9,14 +9,22 @@ defmodule Jobban.Strategist do
   Same contract as the importer and fit scorer: fire-and-forget after create,
   a boot-time backfill for unassessed jobs, and an on-demand re-assess from the
   Launchpad. Any failure leaves the job unassessed and never blocks anything.
+
+  A successful interactive assessment **fans out**: it kicks the briefing
+  (`Jobban.Briefing`) and, when networking is a recommended play and unmapped,
+  the people-map (`Jobban.Networking`) — both fire-and-forget, so opening a
+  freshly-assessed listing already has its context filling in. The boot backfill
+  skips the fan-out (`compose: false`) to avoid an LLM burst on startup.
   """
 
   require Logger
 
   alias Jobban.Board
   alias Jobban.Board.{Job, Plays}
+  alias Jobban.Briefing
   alias Jobban.Importer
   alias Jobban.LLM.OpenRouter
+  alias Jobban.Networking
 
   @doc """
   True when assessment can run: an OpenRouter key is present and the feature
@@ -49,7 +57,7 @@ defmodule Jobban.Strategist do
       end
 
       Enum.each(jobs, fn job ->
-        assess(job)
+        assess(job, compose: false)
         Process.sleep(between_jobs_ms())
       end)
     end
@@ -60,12 +68,19 @@ defmodule Jobban.Strategist do
   @doc """
   Assesses one job synchronously: asks the LLM to rate the plays, then records
   the result (which regenerates the checklist). Returns the updated job.
+
+  On success it fans out to the briefing + people-map (see `followups/2`) unless
+  `compose: false` is passed (the boot backfill does, to avoid an LLM burst).
   """
-  def assess(%Job{} = job) do
+  def assess(job, opts \\ [])
+
+  def assess(%Job{} = job, opts) do
     with {:ok, %{text: response}} <-
            OpenRouter.complete(prompt(job), json: true, max_tokens: 1200),
-         {:ok, assessments} <- parse(response) do
-      Board.record_assessment(job, assessments)
+         {:ok, assessments} <- parse(response),
+         {:ok, assessed} <- Board.record_assessment(job, assessments) do
+      if Keyword.get(opts, :compose, true), do: compose(assessed, assessments)
+      {:ok, assessed}
     else
       error ->
         Logger.warning(
@@ -75,6 +90,36 @@ defmodule Jobban.Strategist do
         {:error, :not_assessed}
     end
   end
+
+  @doc """
+  Which follow-on generators a freshly-assessed `job` should kick: `:brief` when
+  it has no briefing yet, `:guide` when networking is a recommended play and no
+  targets are mapped yet. Pure — the firing lives in `compose/2`.
+  """
+  def followups(job, assessments) do
+    [
+      is_nil(job.job_brief) && :brief,
+      networking_recommended?(assessments) && empty?(job.networking_targets) && :guide
+    ]
+    |> Enum.filter(& &1)
+  end
+
+  defp compose(job, assessments) do
+    Enum.each(followups(job, assessments), fn
+      :brief -> Briefing.brief_async(job)
+      :guide -> Networking.guide_async(job)
+    end)
+
+    :ok
+  end
+
+  defp networking_recommended?(assessments) do
+    Enum.any?(assessments, &(&1.slug == "networking" and Plays.recommended?(&1.leverage)))
+  end
+
+  defp empty?(nil), do: true
+  defp empty?(list) when is_list(list), do: list == []
+  defp empty?(_), do: false
 
   @doc false
   def parse(response) when is_binary(response) do

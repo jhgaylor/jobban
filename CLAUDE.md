@@ -93,7 +93,11 @@ project-specific context.
   fire-and-forget on create + boot backfill + on-demand re-assess) makes one
   LLM call rating every play and returning steps; `Board.record_assessment/2`
   upserts the `JobPlay` rows and **regenerates** the auto-populated tasks
-  (wipes machine steps, keeps freeform). Dragging a card into `applied`
+  (wipes machine steps, keeps freeform). A successful interactive assessment
+  **fans out** (`Strategist.followups/2` + `compose/2`): fire-and-forget kicks
+  the briefing, and the people-map when networking is recommended + unmapped, so
+  a freshly-assessed listing fills in its own context. The boot backfill passes
+  `compose: false` to avoid an LLM burst on startup. Dragging a card into `applied`
   auto-checks the cold-apply play's steps inside `move_job/3` (the board move
   is source of truth). LLM is always an enhancement — an unassessed job just
   shows a "Not assessed yet · Size it up" row until assessed.
